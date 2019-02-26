@@ -1,0 +1,3 @@
+[submodule "ban_vqa"]
+	path = ban_vqa
+	url = git@github.com:jnhwkim/ban-vqa.git
