@@ -2,3 +2,5 @@ data/*
 notebooks/*.png
 notebooks/.ipynb_checkpoints*
 exp-flickr30k/exp-*
+models/__pycache__*
+util/__pycache__*
