@@ -1,0 +1,3 @@
+data/*
+notebooks/*.png
+notebooks/.ipynb_checkpoints*
