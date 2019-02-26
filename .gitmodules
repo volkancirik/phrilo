@@ -1,3 +1,6 @@
 [submodule "ban_vqa"]
 	path = ban_vqa
 	url = git@github.com:jnhwkim/ban-vqa.git
+[submodule "lm_lstm_crf"]
+	path = lm_lstm_crf
+	url = git@github.com:LiyuanLucasLiu/LM-LSTM-CRF.git

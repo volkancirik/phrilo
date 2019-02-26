@@ -316,25 +316,9 @@ class Reader:
         for box in src_our:
           our_set.add(tuple(box))
 
-        # if phrase == '81000' or phrase == 81000 or phrase == 80923 or phrase == '80923':
-        #   imgid = phrase2imgid[str(phrase)]
-        #   ban_box_idx = imgid2idx[split][imgid]
-        #   box_start = box_data[split]['pos_boxes'][ban_box_idx][0]
-        #   box_end = box_data[split]['pos_boxes'][ban_box_idx][1]
-        #   print(phrase, phrase2hit[str(imgid) + '_' + str(phrase)])
-        #   print('imgid | split', imgid, split)
-        #   print('st end # of boxes', box_start, box_end, box_end - box_start)
-        #   print('target', trg_ban, trg_our)
-        #   print('_'*10)
-
         if our_set.intersection(ban_set) == 0:
           error_src[split].append((split, phrase, src_ban, src_our))
           continue
-        # trg_ban = sorted(verification[split]['phrase2target'][phrase])
-        # trg_our = phrase2hit[str(phrase)]
-
-        # if trg_ban != trg_our:
-        #   error_trg[split].append((split, phrase, trg_ban, trg_our))
 
     # for split in split_names:
     #   print('='*20)
