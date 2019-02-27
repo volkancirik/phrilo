@@ -5,12 +5,12 @@ from tqdm import tqdm
 from util.reader import Reader
 
 
-def print_bio(words, tags, output_file):
+def print_bio(words, tags, output_file, merge_o=False):
   for tag in tags:
     start = tag[0]
     end = tag[1]
     if start == end:
-      output_file.write(words[start] + " TAG O\n")
+      output_file.write(words[start] + " TAG B-PH\n")
       continue
 
     if start >= len(words):
@@ -36,6 +36,7 @@ def convert_data(reader_file, output_prefix):
       words = split[0][idx]
       tags, _, _ = split[3][idx]
       print_bio(words, tags, output_file)
+
     output_file.close()
 
 

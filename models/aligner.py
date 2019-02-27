@@ -23,12 +23,6 @@ from util.model_utils import encode_box
 from util.model_utils import score_box
 from util.model_utils import makevar
 
-from ban_vqa.bc import BCNet
-
-
-def list2str(s):
-  return ','.join([str(i) for i in s])
-
 
 class ALIGNER(nn.Module):
   def __init__(self, config, w2i, i2w):
@@ -43,8 +37,16 @@ class ALIGNER(nn.Module):
     self.context_window = self.config['context_window']
     self.use_bert = self.config['use_bert']
 
-    self.nonlinearity = nn.ReLU()
-    self.decoder = LPAligner(max_boxes_per_chunk=1)
+    if config['nonlinearity'] == 'none':
+      self.nonlinearity = None
+    elif config['nonlinearity'] == 'relu':
+      self.nonlinearity = nn.ReLU()
+    elif config['nonlinearity'] == 'hardtanh':
+      self.nonlinearity = nn.Hardtanh(inplace=False)
+    elif config['nonlinearity'] == 'selu':
+      self.nonlinearity = nn.SELU(inplace=False)
+    else:
+      raise NotImplementedError()
 
     if self.use_pos:
       self.pos_coeff = 2
@@ -84,38 +86,35 @@ class ALIGNER(nn.Module):
       self.bert = BERT(layer_number=11, method='sum')
       self.ph_dim += 768
 
-    self.BAN = weight_norm(
-        BCNet(self.bdim, self.ph_dim, self.hdim, 1, dropout=[0., 0.], k=3, act='').cuda(), name='h_mat', dim=None)
+    plist = []
+    for i in range(self.layer):
+      if i == self.layer-1 and i == 0:
+        plist.append(nn.Linear(self.ph_dim, self.bdim))
 
-    # plist = []
-    # for i in range(self.layer):
-    #   if i == self.layer-1 and i == 0:
-    #     plist.append(nn.Linear(self.ph_dim, self.bdim))
+      elif i == self.layer-1:
+        plist.append(nn.Linear(self.hdim, self.bdim))
 
-    #   elif i == self.layer-1:
-    #     plist.append(nn.Linear(self.hdim, self.bdim))
+      elif i == 0:
+        plist.append(nn.Linear(self.ph_dim, self.hdim))
 
-    #   elif i == 0:
-    #     plist.append(nn.Linear(self.ph_dim, self.hdim))
+      else:
+        plist.append(nn.Linear(self.hdim, self.hdim))
+    self.Wpscore = nn.ModuleList(plist)
 
-    #   else:
-    #     plist.append(nn.Linear(self.hdim, self.hdim))
-    # self.Wpscore = nn.ModuleList(plist)
+    flist = []
+    for i in range(self.layer):
+      if i == self.layer-1 and i == 0:
+        flist.append(nn.Linear(self.bdim, 1))
 
-    # flist = []
-    # for i in range(self.layer):
-    #   if i == self.layer-1 and i == 0:
-    #     flist.append(nn.Linear(self.bdim, 1))
+      elif i == self.layer-1:
+        flist.append(nn.Linear(self.hdim, 1))
 
-    #   elif i == self.layer-1:
-    #     flist.append(nn.Linear(self.hdim, 1))
+      elif i == 0:
+        flist.append(nn.Linear(self.bdim, self.hdim))
 
-    #   elif i == 0:
-    #     flist.append(nn.Linear(self.bdim, self.hdim))
-
-    #   else:
-    #     flist.append(nn.Linear(self.hdim, self.hdim))
-    # self.Wfscore = nn.ModuleList(flist)
+      else:
+        flist.append(nn.Linear(self.hdim, self.hdim))
+    self.Wfscore = nn.ModuleList(flist)
 
     self.criterion = nn.BCEWithLogitsLoss()
 
@@ -150,19 +149,21 @@ class ALIGNER(nn.Module):
     return phrase_rep
 
   def score(self, phrase_rep, box_feats):
-    # phrase = encode_phrase(
-    #     self.Wpscore, phrase_rep, self.layer, self.nonlinearity, dim=self.bdim)
-    # prod = phrase.expand_as(phrase) * box_feats
-    # n_boxes = box_feats.size(0)
-    # norm = prod / \
-    #     (torch.norm(prod, 2, 1).view(n_boxes, 1)).expand_as(prod)
-    # score_batch = score_box(self.Wfscore, norm)
-    # return score_batch.view(1, n_boxes)
-    return self.BAN(box_feats.unsqueeze(
-        0), phrase_rep.unsqueeze(0)).sum(1).sum(2)
+    phrase = encode_phrase(
+        self.Wpscore, phrase_rep, self.layer, self.nonlinearity, dim=self.bdim)
+    prod = phrase.expand_as(phrase) * box_feats
+    n_boxes = box_feats.size(0)
+    norm = prod / \
+        (torch.norm(prod, 2, 1).view(n_boxes, 1)).expand_as(prod)
+    score_batch = score_box(self.Wfscore, norm)
+    return score_batch.view(1, n_boxes)
 
   def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
 
+    if self.training:
+      self.decoder = LPAligner(max_boxes_per_chunk=4, min_boxes_per_chunk=1)
+    else:
+      self.decoder = LPAligner(max_boxes_per_chunk=1, min_boxes_per_chunk=1)
     cnn, spat = box_reps
     feats = [cnn, spat]
     box_feats = torch.cat(feats, 1)
@@ -171,67 +172,65 @@ class ALIGNER(nn.Module):
                         numpy_var=True)
     box_feats = torch.cat([box_feats, box_dummy], 0)
 
-    n_boxes = len(box_feats)
-    phrases = []
-    gt_boxes = []
-    for ph, al in zip(gt_chunks, gt_alignments):
+    n_boxes = cnn.size(0)
+
+    n_chunks = 0
+    grounded_chunks = []
+    grounded_alignments = []
+    for ii, al in enumerate(gt_alignments):
       if al != []:
-        phrases.append(ph)
-        gt_boxes.append(al)
-    n_chunks = len(phrases)
+        grounded_alignments += [al]
+        grounded_chunks += [gt_chunks[ii]]
+
+    n_boxes = box_feats.size(0)
+    n_chunks = len(grounded_alignments)
 
     scores_batch = []
     score_np_batch = np.zeros((1, n_boxes * n_chunks))
     loss = 0.
 
-    ###
-    #out_alignments = defaultdict(list)
-
-    for i in range(n_chunks):
+    for ii in range(n_chunks):
 
       expected = [0]*n_boxes
-      for b in gt_boxes[i]:
+      for b in grounded_alignments[ii]:
         expected[b] = 1.0
       gold = makevar(np.array([expected]), numpy_var=True)
 
       phrase_rep = self.get_phrase_rep(
-          sentence, pos_tags, phrases[i][0], phrases[i][1]+1)
-#      al_score = self.score(phrase_rep, box_feats)
-#      loss += self.criterion(al_score, gold)
+          sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1)
       score_batch = self.score(phrase_rep, box_feats)
       loss += self.criterion(score_batch, gold)
-      # prediction = np.round(score_batch.data.cpu().numpy()[0])
-      # for kk, pr_box in enumerate(prediction):
-      #   if pr_box:
-      #     out_alignments[phrases[i]].append(kk)
+
+      augmentation = np.zeros((1, score_batch.size(1)))
+      for k in range(n_boxes):
+        if k not in grounded_alignments[ii] and self.training:
+          augmentation[0, k] = 1.0
+      score_batch = score_batch + makevar(augmentation, numpy_var=True).float()
 
       scores_batch.append(score_batch)
-      score_np_batch[0, i*n_boxes: (i+1) *
+      score_np_batch[0, ii*n_boxes: (ii+1) *
                      n_boxes] = score_batch.data.cpu().numpy()
-    score_batch = torch.cat(scores_batch, 1)
 
+    score_batch = torch.cat(scores_batch, 1)
     pred_alignments = self.decoder.solve(
         score_np_batch, n_chunks, n_boxes)
-
     pred_score = 0.0
+
     for chunk in pred_alignments[1]:
       for box in pred_alignments[1][chunk]:
-        idx = box + n_boxes*chunk  # *phrases.index(chunk)
+        idx = box + n_boxes*chunk
         pred_score += score_batch[0, idx]
 
     gt_score = 0.0
-    chunks = 0
+    for ii in range(n_chunks):
+      for box in grounded_alignments[ii]:
+        idx = box + n_boxes*ii
+        gt_score += score_batch[0, idx]
 
-    for alist in gt_alignments:
-      if alist != []:
-        for box in alist:
-          idx = box + n_boxes*chunks
-          gt_score += score_batch[0, idx]
-        chunks += 1
     loss = loss + pred_score - gt_score
 
     converted = defaultdict(list)
     for ch in pred_alignments[1]:
-      converted[phrases[ch]] = pred_alignments[1][ch]
+      converted[grounded_chunks[ch]] = pred_alignments[1][ch]
 
     return loss, [], converted

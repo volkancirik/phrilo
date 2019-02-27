@@ -114,7 +114,8 @@ def train():
     net.config['command'] += [config['command']]
   print("model loaded.")
 
-  task_chunk = args.model in set(["chunker", "chal", "banpipeline"])
+  task_chunk = args.model in set(
+      ["chunker", "chal", "pipelinecrf", "pipelineilp"])
   task_align = args.model in set(
       ["aligner", "chal", "mlp", "ban", "singlepassmlp", "cheat", "banpipeline"])
   print("Tasks: chunk {} | align {}".format(task_chunk, task_align))

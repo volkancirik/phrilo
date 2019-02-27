@@ -25,9 +25,9 @@ from util.model_utils import encode_box
 from util.model_utils import score_box
 
 
-class BANPIPELINE(nn.Module):
+class PIPELINEILP(nn.Module):
   def __init__(self, config):
-    super(BANPIPELINE, self).__init__()
+    super(PIPELINEILP, self).__init__()
     self.config = config
     self.ALIGNER = torch.load(self.config['aligner'])
     self.CHUNKER = torch.load(self.config['chunker'])
@@ -37,7 +37,7 @@ class BANPIPELINE(nn.Module):
     for param in self.CHUNKER.parameters():
       param.requires_grad = False
 
-  def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
+  def forward(self, sentence, pos_tags, box_reps, gt_chunks, _gt_alignments, debug=False):
 
     cnn, spat = box_reps
     feats = [cnn, spat]
@@ -48,10 +48,6 @@ class BANPIPELINE(nn.Module):
     box_feats = torch.cat([box_feats, box_dummy], 0)
 
     n_boxes = cnn.size(0)
-
-    for ii, ch in enumerate(gt_chunks):
-      if not gt_alignments[ii]:
-        gt_alignments[ii] = [n_boxes]
 
     n_tokens = len(sentence)
     n_chunks = int((n_tokens*(n_tokens+1))/2)

@@ -114,3 +114,8 @@ if __name__ == '__main__':
   parsed_f30k = parse_sentence(s)
   print(' '.join(get_tokens(parsed_f30k)))
   print(sentence2bio(s, e2box))
+
+  s = '[/EN#251483/people Two motorcyclists] racing [/EN#251490/bodyparts neck] and [/EN#251491/bodyparts neck] around [/EN#251486/scene a corner] .'
+  parsed_f30k = parse_sentence(s)
+  for ph in parsed_f30k:
+    print(ph.entity, ph.tokens)

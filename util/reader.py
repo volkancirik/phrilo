@@ -493,6 +493,7 @@ class Reader:
               total_ph += 1
 
           sent_tagged = nlp(' '.join(words))
+
           pos_tags = []
           for t in sent_tagged:
             pos_tags.append(t.tag_)
