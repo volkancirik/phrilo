@@ -49,6 +49,28 @@ def embed_symbols(vocab, emb, symbols, start, end):
   return embedded
 
 
+def get_context_emmbedding(tok_list, start, end, vocab, emb, window_size=2):
+  start += window_size
+  end += window_size
+  tok_list = ["<go>"]*window_size + tok_list + ["<eos>"]*window_size
+
+  toks_left = []
+  toks_right = []
+  for i in range(window_size):
+    toks_left.append(tok_list[start - window_size + i])
+    toks_right.append(tok_list[end + i])
+
+  emb_left_seq = embed_symbols(vocab, emb, toks_left, 0, len(toks_left))
+  emb_right_seq = embed_symbols(vocab, emb, toks_left, 0, len(toks_left))
+
+  emb_left = torch.sum(torch.cat(emb_left_seq, 0), 0).view(1, -1)
+  emb_right = torch.sum(torch.cat(emb_right_seq, 0), 0).view(1, -1)
+
+  emb_ctx = torch.cat([emb_left, emb_right], 1)
+
+  return emb_ctx
+
+
 def get_context_vector(tok_list, start, end, vocab, window_size=2):
   start += window_size
   end += window_size
@@ -69,13 +91,33 @@ def get_context_vector(tok_list, start, end, vocab, window_size=2):
   return makevar(ctx_left, numpy_var=True).float(), makevar(ctx_right, numpy_var=True).float()
 
 
+def phrase_positional_encoding(start, end, emb_dim):
+  position_enc = np.array([
+      [pos / np.power(10000, 2 * (j // 2) / emb_dim) for j in range(emb_dim)]
+      if pos != 0 else np.zeros(emb_dim) for pos in range(start, end+1)])
+  position_enc[:, 0:: 2] = np.sin(position_enc[:, 0:: 2])
+  # apply cos on 1st,3rd,5th...emb_dim
+  position_enc[:, 1:: 2] = np.cos(position_enc[:, 1:: 2])
+
+  position_enc = np.sum(position_enc, 0).reshape(1, emb_dim)
+  return makevar(position_enc, numpy_var=True).float()
+
+
+def chunk_positional_encoding(start, end, emb_dim):
+  enc_idx = makevar(
+      np.repeat(np.array([end-start, start, end]), emb_dim)).float()
+  enc_pos = phrase_positional_encoding(start, end, emb_dim)
+
+  return torch.cat([enc_idx, enc_pos], 1)
+
+
 def init_forget(l):
   for names in l._all_weights:
     for name in filter(lambda n: "bias" in n,  names):
       bias = getattr(l, name)
       n = bias.size(0)
       start, end = n//4, n//2
-      bias.data[start:end].fill_(1.)
+      bias.data[start: end].fill_(1.)
 
 
 def get_n_params(model, verbose=False):

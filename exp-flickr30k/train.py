@@ -20,7 +20,7 @@ from models.get_model import get_model
 from util.model_utils import dump_tensors
 
 
-def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_metric='chunking', use_gt=False, use_predicted=False, details=False):
+def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_metric='chunking', use_gt=False, use_predicted=False, details=False, max_length=50):
 
   pbar = tqdm(list(range(len(split[0]))))
   net.eval()
@@ -38,7 +38,7 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
     if all([al == [] for al in gt_alignments[box_type]]):
       continue
     if (task_align and
-            len(words) > 20):
+            len(words) > max_length):
       continue
 
     pred_boxes, gt_boxes = split[1][i]
@@ -186,7 +186,7 @@ def train():
         box_type = 'gt' if args.use_gt else 'pred'
 
         gt_chunks, gt_alignments, pos_tags = split[3][idx]
-        if (not task_align and len(words) > 20) or all([al == [] for al in gt_alignments[box_type]]):
+        if (not task_align and len(words) > args.max_length) or all([al == [] for al in gt_alignments[box_type]]):
           continue
         max_len = epoch*5
         if task_align and task_chunk and len(words) > 10 + max_len:

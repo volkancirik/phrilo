@@ -34,10 +34,14 @@ class COMPOSER(nn.Module):
       init_forget(self.rnn0)
       init_forget(self.rnn1)
 
-      self.h00 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
-      self.c00 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
-      self.h01 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
-      self.c01 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
+      self.h00 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
+      self.c00 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
+      self.h01 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
+      self.c01 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
 
     elif self.encoder == 'lstm':
       self.Wscr = nn.Linear(self.hdim*4, 1)
@@ -48,10 +52,14 @@ class COMPOSER(nn.Module):
       init_forget(self.rnn0)
       init_forget(self.rnn1)
 
-      self.h00 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
-      self.c00 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
-      self.h01 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
-      self.c01 = makevar(np.zeros((2, 1, self.hdim)), numpy_var=True)
+      self.h00 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
+      self.c00 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
+      self.h01 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
+      self.c01 = nn.Parameter(
+          makevar(np.zeros((2, 1, self.hdim)), numpy_var=True))
 
     elif self.encoder == 'fuse':
       self.Winp2ctx = nn.Linear(self.wdim, self.hdim)
@@ -107,7 +115,7 @@ class COMPOSER(nn.Module):
     else:
       weighted = attention.expand_as(inp_rep) * inp_rep
     waverage = torch.sum(weighted, 0)
-    return waverage, attention
+    return waverage.view(1, -1), attention
 
 
 class DAN(nn.Module):

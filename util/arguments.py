@@ -35,8 +35,11 @@ def get_flickr30k_train():
   parser.add_argument('--layer', dest='layer', type=int,
                       help='# of layers for stack encoding projections, default = 1', default=1)
 
-  parser.add_argument('--context-window', dest='context_window', type=int,
-                      help='context window size default = 0', default=0)
+  parser.add_argument('--context-vector', dest='context_vector', type=int,
+                      help='context vector for one hot encoding size default = 0', default=0)
+
+  parser.add_argument('--context-embedding', dest='context_embedding', type=int,
+                      help='context word embedding size default = 2', default=2)
 
   parser.add_argument('--word-dim', dest='word_dim', type=int,
                       help='dimension for word embeddings, default = 300', default=300)
@@ -94,6 +97,9 @@ def get_flickr30k_train():
 
   parser.add_argument('--details', dest='details',
                       action='store_true', help='print details to progress bar.')
+
+  parser.add_argument('--max-length', type=int, default=20,
+                      help='max sentence length, default = 20')
 
   args = parser.parse_args()
   return args

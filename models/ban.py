@@ -23,7 +23,8 @@ from util.model_utils import encode_phrase
 from util.model_utils import get_context_vector
 from util.model_utils import encode_box
 from util.model_utils import score_box
-
+from util.model_utils import chunk_positional_encoding
+from util.model_utils import get_context_emmbedding
 from ban_vqa.bc import BCNet
 
 
@@ -37,7 +38,10 @@ class BAN(nn.Module):
     self.layer = self.config['layer']
     self.encoder = self.config['encoder']
     self.use_pos = self.config['use_pos']
-    self.context_window = self.config['context_window']
+
+    self.context_vector = self.config['context_vector']
+    self.context_embedding = self.config['context_embedding']
+
     self.use_bert = self.config['use_bert']
 
     self.nonlinearity = nn.ReLU()
@@ -60,14 +64,17 @@ class BAN(nn.Module):
     self.We_pos = nn.Embedding(len(self.t2i), self.wdim)
 
     plist = []
-    context_dim = 3*16
-    if self.context_window:
+    self.pos_dim = 32
+    context_dim = 4*self.pos_dim
+    if self.context_vector:
       context_dim += len(self.w2i)*2 + len(self.t2i)*2
+    if self.context_embedding:
+      context_dim += self.wdim*2
 
     if self.encoder == 'bilstm+att':
       self.ph_rnn = COMPOSER(self.wdim * self.pos_coeff,
                              self.hdim, encoder='lstm', use_hid=False)
-      self.ph_dim = self.wdim
+      self.ph_dim = self.wdim*2
     elif self.encoder == 'average':
       self.ph_rnn = DAN(self.wdim * self.pos_coeff,
                         self.hdim, layer=self.layer)
@@ -101,19 +108,23 @@ class BAN(nn.Module):
     else:
       phrase, _ = self.ph_rnn(torch.cat(emb_tokens, 0))
 
-    phrase_feats = makevar(
-        np.repeat(np.array([end_idx-start_idx, start_idx, end_idx]), 16)).float()
+    phrase_feats = chunk_positional_encoding(start_idx, end_idx, self.pos_dim)
     phrase_rep_list = [phrase, phrase_feats]
 
     if self.use_bert:
       bert_rep = self.bert(sentence[start_idx:end_idx])
       phrase_rep_list += [bert_rep]
 
-    if self.context_window:
+    if self.context_embedding:
+      ctx_emb = get_context_emmbedding(
+          sentence, start_idx, end_idx, self.w2i, self.We_wrd, window_size=self.context_embedding)
+      phrase_rep_list += [ctx_emb]
+
+    if self.context_vector:
       tok_left, tok_right = get_context_vector(
-          sentence, start_idx, end_idx, self.w2i, window_size=self.context_window)
+          sentence, start_idx, end_idx, self.w2i, window_size=self.context_vector)
       pos_left, pos_right = get_context_vector(
-          pos_tags, start_idx, end_idx, self.t2i, window_size=self.context_window)
+          pos_tags, start_idx, end_idx, self.t2i, window_size=self.context_vector)
       phrase_rep_list += [tok_left, tok_right, pos_left, pos_right]
     phrase_rep = torch.cat(phrase_rep_list, 1)
     return phrase_rep

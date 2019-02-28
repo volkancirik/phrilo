@@ -17,6 +17,8 @@ from models.lp_solvers import LPChunker
 from models.composer import COMPOSER, DAN, BILSTM, BERT
 from util.model_utils import makevar, init_forget
 from util.model_utils import embed_symbols, get_context_vector, encode_phrase
+from util.model_utils import chunk_positional_encoding
+from util.model_utils import get_context_emmbedding
 
 
 class CHUNKER(nn.Module):
@@ -29,7 +31,8 @@ class CHUNKER(nn.Module):
     self.layer = self.config['layer']
     self.encoder = self.config['encoder']
     self.use_pos = self.config['use_pos']
-    self.context_window = self.config['context_window']
+    self.context_vector = self.config['context_vector']
+    self.context_embedding = self.config['context_embedding']
     self.use_bert = self.config['use_bert']
 
     self.RELU = nn.ReLU()
@@ -92,19 +95,24 @@ class CHUNKER(nn.Module):
     self.We_pos = nn.Embedding(len(self.t2i), self.wdim)
 
     plist = []
-    context_dim = 0
-    if self.context_window:
-      context_dim = len(self.w2i)*2 + len(self.t2i)*2
+
+    self.pos_dim = 32
+    context_dim = self.pos_dim*4
+    if self.context_vector:
+      context_dim += len(self.w2i)*2 + len(self.t2i)*2
+    if self.context_embedding:
+      context_dim += self.wdim*2
 
     for i in range(self.layer):
       if i == self.layer-1 and i == 0:
-        plist.append(nn.Linear(self.ph_dim+3*16+context_dim, 1))
+        plist.append(nn.Linear(self.ph_dim+context_dim, 1))
 
       elif i == self.layer-1:
         plist.append(nn.Linear(self.hdim, 1))
 
       elif i == 0:
-        plist.append(nn.Linear(self.ph_dim+3*16+context_dim, self.hdim))
+        plist.append(
+            nn.Linear(self.ph_dim+context_dim, self.hdim))
 
       else:
         plist.append(nn.Linear(self.hdim, self.hdim))
@@ -125,15 +133,18 @@ class CHUNKER(nn.Module):
       phrase, _ = self.ph_rnn(torch.cat(emb_tokens, 0))
 
     phrase = phrase.contiguous().view(1, -1)
-    phrase_feats = makevar(
-        np.repeat(np.array([end_idx-start_idx, start_idx, end_idx]), 16)).float()
+    phrase_feats = chunk_positional_encoding(start_idx, end_idx, self.pos_dim)
 
     phrase_rep_list = [phrase, phrase_feats]
-    if self.context_window:
+    if self.context_embedding:
+      ctx_emb = get_context_emmbedding(
+          sentence, start_idx, end_idx, self.w2i, self.We_wrd, window_size=self.context_embedding)
+      phrase_rep_list += [ctx_emb]
+    if self.context_vector:
       tok_left, tok_right = get_context_vector(
-          sentence, start_idx, end_idx, self.w2i, window_size=self.context_window)
+          sentence, start_idx, end_idx, self.w2i, window_size=self.context_vector)
       pos_left, pos_right = get_context_vector(
-          pos_tags, start_idx, end_idx, self.t2i, window_size=self.context_window)
+          pos_tags, start_idx, end_idx, self.t2i, window_size=self.context_vector)
       phrase_rep_list += [tok_left, tok_right, pos_left, pos_right]
 
     if self.use_bert:
