@@ -40,8 +40,6 @@ class CHAL(nn.Module):
     print('aligner and chunker is loaded from {} and {}'.format(
         self.config['aligner'], self.config['chunker']))
 
-    self.decoder = LPChunkerAligner(
-        min_boxes_per_chunk=0, max_boxes_per_chunk=1)
     self.criterion = nn.BCEWithLogitsLoss()
 
   def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
@@ -49,6 +47,12 @@ class CHAL(nn.Module):
     if self.training:
       for param in self.CHUNKER.parameters():
         param.requires_grad = True
+    if self.training:
+      self.decoder = LPChunkerAligner(max_boxes_per_chunk=4,
+                                      min_boxes_per_chunk=1)
+    else:
+      self.decoder = LPChunkerAligner(max_boxes_per_chunk=1,
+                                      min_boxes_per_chunk=1)
 
     cnn, spat = box_reps
     feats = [cnn, spat]
@@ -61,17 +65,21 @@ class CHAL(nn.Module):
 
     n_boxes = cnn.size(0)
 
-    for ii, ch in enumerate(gt_chunks):
-      if not gt_alignments[ii]:
-        gt_alignments[ii] = [n_boxes]
+    grounded_chunks = []
+    grounded_alignments = []
+    for ii, al in enumerate(gt_alignments):
+      if al != []:
+        grounded_alignments += [al]
+        grounded_chunks += [gt_chunks[ii]]
 
+    n_gr_chunks = len(grounded_alignments)
     n_tokens = len(sentence)
     n_chunks = int((n_tokens*(n_tokens+1))/2)
     n_boxes = box_feats.size(0)
 
     score = [None]*n_chunks*(1 + n_boxes)
     score_np = np.zeros((1, n_chunks*(1 + n_boxes)))
-    gt_chunk_set = set(gt_chunks)
+    gt_chunk_set = set(grounded_chunks)
 
     idx = 0
     box_idx = 0
@@ -126,7 +134,7 @@ class CHAL(nn.Module):
     mean_scale = np.mean(score_np[0, n_chunks:]) / \
         np.mean(score_np[0, 0:n_chunks])
     score_np[0, n_chunks:] = score_np[0, n_chunks:] / \
-        ((mean_scale*10))
+        ((mean_scale*1))
     # score_np = score_np - np.min(score_np)
 
     pred_chunks, pred_alignments, tok2chunks, id2chunk, chunk2id = self.decoder.solve(
@@ -154,13 +162,28 @@ class CHAL(nn.Module):
         pred_al_score += score[idx]
 
     for ii, alist in enumerate(gt_alignments):
-      if alist != []:
-        for box in alist:
-          idx = box + n_chunks + n_boxes*chunk2id[gt_chunks[ii]]
-          gt_al_score += score[idx]
+      for box in alist:
+        idx = box + n_chunks + n_boxes*chunk2id[gt_chunks[ii]]
+        gt_al_score += score[idx]
 
-    # loss_scale = ((pred_al_score - gt_al_score) /
-    #               (pred_ch_score - gt_ch_score) + 0.001)
+    loss_scale_joint = ((pred_al_score - gt_al_score) /
+                        (pred_ch_score - gt_ch_score) + EPS)
+    loss_scale_type = loss / ((pred_al_score - gt_al_score) +
+                              (pred_ch_score - gt_ch_score))
+    print("\n")
+    print("n_boxes | n_tokens | n_chunks", n_boxes,
+          n_tokens, n_chunks)
+    print("ch_box2idx\n", ch_box2idx)
+    print("\nidx2ch_box\n", idx2ch_box)
+    print("pred_ch_score - gt_ch_score", pred_ch_score - gt_ch_score)
+    print("pred_al_score - gt_al_score", pred_al_score - gt_al_score)
+    print("loss", loss)
+    print("joint loss_scale al/ch", loss_scale_joint)
+    print("type loss_scale bce/lamm", loss_scale_type)
+    print("mean weight scale al/ch", mean_scale)
+    print("")
+    input()
+
     loss_scale = 0.0001
     loss = loss + (pred_ch_score*loss_scale + pred_al_score) - \
         (gt_ch_score*loss_scale + gt_al_score)

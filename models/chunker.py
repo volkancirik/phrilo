@@ -19,7 +19,7 @@ from util.model_utils import makevar, init_forget
 from util.model_utils import embed_symbols, get_context_vector, encode_phrase
 from util.model_utils import chunk_positional_encoding
 from util.model_utils import get_context_emmbedding
-
+import pdb
 
 class CHUNKER(nn.Module):
   def __init__(self, config, w2i, i2w):
@@ -86,12 +86,13 @@ class CHUNKER(nn.Module):
       else:
         mlist.append(nn.Linear(self.hdim, self.hdim))
     self.Wff = nn.ModuleList(mlist)
-
-    nlp = spacy.load('en')
+    nlp = spacy.load('en_core_web_sm')
+    #print('HERE!')
+    #pdb.set_trace()
     self.t2i = {t: i for i, t in enumerate(
-        nlp.tagger.labels + ('<go>', '<eos>', '<unk>'))}
+        nlp.pipeline[1][1].labels + ('<go>', '<eos>', '<unk>'))}
     self.i2t = {i: t for i, t in enumerate(
-        nlp.tagger.labels + ('<go>', '<eos>', '<unk>'))}
+        nlp.pipeline[1][1].labels + ('<go>', '<eos>', '<unk>'))}
     self.We_pos = nn.Embedding(len(self.t2i), self.wdim)
 
     plist = []

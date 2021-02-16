@@ -19,7 +19,9 @@ from util.arguments import get_flickr30k_train
 from models.get_model import get_model
 
 
-def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_metric="chunking", use_gt=False, use_predicted=False):
+def evaluate(net, split, box_data,
+             task_chunk=False, task_align=False, target_metric="chunking",
+             use_gt=False, use_predicted=False, details=False):
 
   pbar = tqdm(list(range(len(split[0]))))
   net.eval()
@@ -64,8 +66,11 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
       hit_align += hit
       count_align += tot
 
-    pbar.set_description("chunk {:3.4f} alignment {:3.4f}".format(
-        f1_chunk / count_chunk, hit_align / count_align))
+    pbar_str = "chunk {:3.4f} alignment {:3.4f}".format(
+        f1_chunk / count_chunk, hit_align / count_align)
+    if details:
+      pbar_str += '>>>> {} ||| {}'.format(pred_al_tuples, gt_al_tuples)
+    pbar.set_description(pbar_str)
 
   metrics = {"chunking":  f1_chunk/count_chunk,
              "alignment": hit_align/count_align}
@@ -117,11 +122,11 @@ def train():
   task_chunk = args.model in set(
       ["chunker", "chal", "pipelinecrf", "pipelineilp"])
   task_align = args.model in set(
-      ["aligner", "chal", "mlp", "ban", "singlepassmlp", "cheat", "banpipeline"])
+      ["aligner", "ban", "chal", "pipelinecrf", "pipelineilp"])
   print("Tasks: chunk {} | align {}".format(task_chunk, task_align))
 
   val_score = evaluate(
-      net, reader.data['val'], box_data, task_chunk=task_chunk, task_align=task_align, target_metric="alignment" if task_align else "chunking", use_gt=args.use_gt, use_predicted=args.use_predicted)
+      net, reader.data['val'], box_data, task_chunk=task_chunk, task_align=task_align, target_metric="alignment" if task_align else "chunking", use_gt=args.use_gt, use_predicted=args.use_predicted, details=args.details)
   print("\nVal Score: {:3.4f}".format(val_score))
 
 

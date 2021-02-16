@@ -60,11 +60,11 @@ class ALIGNER(nn.Module):
     self.i2w = i2w
     self.We_wrd = nn.Embedding(len(w2i), self.wdim)
 
-    nlp = spacy.load('en')
+    nlp = spacy.load('en_core_web_sm')
     self.t2i = {t: i for i, t in enumerate(
-        nlp.tagger.labels + ('<go>', '<eos>', '<unk>'))}
+        nlp.pipeline[1][1].labels + ('<go>', '<eos>', '<unk>'))}
     self.i2t = {i: t for i, t in enumerate(
-        nlp.tagger.labels + ('<go>', '<eos>', '<unk>'))}
+        nlp.pipeline[1][1].labels + ('<go>', '<eos>', '<unk>'))}
     self.We_pos = nn.Embedding(len(self.t2i), self.wdim)
 
     self.pos_dim = 32
@@ -188,7 +188,6 @@ class ALIGNER(nn.Module):
 
     n_boxes = cnn.size(0)
 
-    n_chunks = 0
     grounded_chunks = []
     grounded_alignments = []
     for ii, al in enumerate(gt_alignments):
