@@ -28,6 +28,8 @@ def get_flickr30k_train():
 
   parser.add_argument('--encoder', dest='encoder',
                       help='phrase encoder average|bilstm|bilstm+att default=bilstm', default='bilstm')
+  parser.add_argument('--contextualized', dest='contextualized',
+                      help='sentence context encoder bilstm|bert default=""', default='')
 
   parser.add_argument('--hidden', dest='hid_dim', type=int,
                       help='# of hidden units, default = 128', default=128)

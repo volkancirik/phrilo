@@ -1,3 +1,6 @@
+from torch.autograd import Variable
+from pytorch_pretrained_bert import BertTokenizer
+from pytorch_pretrained_bert import BertModel
 import numpy as np
 import torch
 import torch.nn as nn
@@ -174,7 +177,7 @@ class BILSTM(nn.Module):
     output1, (ht1, ct1) = self.rnn1(output0, (self.h01, self.c01))
 
     if return_seq:
-      out = output1
+      out = output1.squeeze(1)
     else:
       out = output1[-1]
 #    forward_ = output1[-1, :self.hdim]
@@ -182,11 +185,6 @@ class BILSTM(nn.Module):
 #    return torch.cat((forward_, backward), dim=1), ''
 
     return out, ''
-
-
-from pytorch_pretrained_bert import BertModel
-from pytorch_pretrained_bert import BertTokenizer, BertModel
-from torch.autograd import Variable
 
 
 class BERT(nn.Module):
@@ -201,13 +199,15 @@ class BERT(nn.Module):
     self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
     self.embedder = BertModel.from_pretrained('bert-base-uncased')
 
-  def forward(self, tokens):
+  def forward(self, tokens, return_seq=False):
 
     tokenized = Variable(torch.tensor(
         [self.tokenizer.vocab.get(tok, self.tokenizer.vocab['[UNK]']) for tok in tokens])).view(1, -1).cuda()
 
     encoded_layers, _ = self.embedder.forward(tokenized)
     sequence = encoded_layers[self.layer_number]
+    if return_seq:
+      return sequence.squeeze(0), ''
     if self.method == 'sum':
       return torch.sum(sequence, 1)
     elif self.method == 'mean':

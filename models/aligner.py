@@ -92,6 +92,14 @@ class ALIGNER(nn.Module):
       self.bert = BERT(layer_number=11, method='sum')
       self.ph_dim += 768
 
+    self.contextualized = self.config['contextualized']
+    if self.contextualized == 'bilstm':
+      self.context_fn = BILSTM(self.wdim * self.pos_coeff, self.hdim)
+      self.ph_dim += self.hdim * 2
+    elif self.contextualized == 'bert':
+      self.context_fn = BERT(layer_number=11, method='sum')
+      self.ph_dim += 768
+
     plist = []
     for i in range(self.layer):
       if i == self.layer-1 and i == 0:
@@ -124,7 +132,16 @@ class ALIGNER(nn.Module):
 
     self.criterion = nn.BCEWithLogitsLoss()
 
-  def get_phrase_rep(self, sentence, pos_tags, start_idx, end_idx):
+  def get_phrase_rep(self, sentence, pos_tags, start_idx, end_idx,
+                     sentence_context=None):
+
+    if self.contextualized:
+      phrase_tokens = sentence_context[start_idx: end_idx, :]
+      phrase_sent_context = torch.sum(phrase_tokens, 0).unsqueeze(0)
+      phrase_rep_list = [phrase_sent_context]
+    else:
+      phrase_rep_list = []
+
     emb_tokens = embed_symbols(
         self.w2i, self.We_wrd, sentence, start_idx, end_idx)
     if self.use_pos:
@@ -132,13 +149,12 @@ class ALIGNER(nn.Module):
           self.t2i, self.We_pos, pos_tags, start_idx, end_idx)
       emb_rep = torch.cat([torch.cat(emb_tags, 0),
                            torch.cat(emb_tokens, 0)], 1)
-
-      phrase, _ = self.ph_rnn(emb_rep)
     else:
-      phrase, _ = self.ph_rnn(torch.cat(emb_tokens, 0))
+      emb_rep = torch.cat(emb_tokens, 0)
+    phrase, _ = self.ph_rnn(emb_rep)
 
     phrase_feats = chunk_positional_encoding(start_idx, end_idx, self.pos_dim)
-    phrase_rep_list = [phrase, phrase_feats]
+    phrase_rep_list += [phrase, phrase_feats]
 
     if self.use_bert:
       bert_rep = self.bert(sentence[start_idx:end_idx])
@@ -203,6 +219,23 @@ class ALIGNER(nn.Module):
     score_np_batch = np.zeros((1, n_boxes * n_chunks))
     loss = 0.
 
+    if self.contextualized:
+      emb_tokens = embed_symbols(
+          self.w2i, self.We_wrd, sentence, 0, len(sentence))
+      if self.use_pos:
+        emb_tags = embed_symbols(
+            self.t2i, self.We_pos, pos_tags, 0, len(sentence))
+        emb_rep = torch.cat([torch.cat(emb_tags, 0),
+                             torch.cat(emb_tokens, 0)], 1)
+
+        sentence_context, _ = self.context_fn(emb_rep,
+                                              return_seq=True)
+      else:
+        sentence_context, _ = self.context_fn(torch.cat(emb_tokens, 0),
+                                              return_seq=True)
+    else:
+      sentence_context = None
+
     for ii in range(n_chunks):
 
       expected = [0]*n_boxes
@@ -211,7 +244,8 @@ class ALIGNER(nn.Module):
       gold = makevar(np.array([expected]), numpy_var=True)
 
       phrase_rep = self.get_phrase_rep(
-          sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1)
+          sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
+          sentence_context=sentence_context)
       score_batch = self.score(phrase_rep, box_feats)
       loss += self.criterion(score_batch, gold)
 
