@@ -162,6 +162,7 @@ class ALIGNER(nn.Module):
   def score(self, phrase_rep, box_feats):
     phrase = encode_phrase(
         self.Wpscore, phrase_rep, self.layer, self.nonlinearity, dim=self.bdim)
+
     prod = phrase.expand_as(phrase) * box_feats
     n_boxes = box_feats.size(0)
     norm = prod / \

@@ -7,22 +7,15 @@ __author__ = 'volkan cirik'
 
 from collections import defaultdict
 import numpy as np
-import spacy
+
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
-import torch.nn.functional as F
+
 
 from models.lp_solvers import LPChunkerAligner
-from models.lp_solvers import LPChunker
-from models.composer import COMPOSER, DAN, BILSTM, BERT
-from util.model_utils import embed_symbols
-from util.model_utils import encode_phrase
-from util.model_utils import get_context_vector
-
 
 from util.model_utils import makevar
-
+import ipdb
 EPS = 1e-10
 
 
@@ -41,18 +34,14 @@ class CHAL(nn.Module):
         self.config['aligner'], self.config['chunker']))
 
     self.criterion = nn.BCEWithLogitsLoss()
+    self.decoder = LPChunkerAligner(max_boxes_per_chunk=10,
+                                    min_boxes_per_chunk=1)
 
   def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
 
     if self.training:
       for param in self.CHUNKER.parameters():
         param.requires_grad = True
-    if self.training:
-      self.decoder = LPChunkerAligner(max_boxes_per_chunk=4,
-                                      min_boxes_per_chunk=1)
-    else:
-      self.decoder = LPChunkerAligner(max_boxes_per_chunk=1,
-                                      min_boxes_per_chunk=1)
 
     cnn, spat = box_reps
     feats = [cnn, spat]
@@ -72,7 +61,7 @@ class CHAL(nn.Module):
         grounded_alignments += [al]
         grounded_chunks += [gt_chunks[ii]]
 
-    n_gr_chunks = len(grounded_alignments)
+#    n_gr_chunks = len(grounded_alignments)
     n_tokens = len(sentence)
     n_chunks = int((n_tokens*(n_tokens+1))/2)
     n_boxes = box_feats.size(0)
@@ -170,21 +159,22 @@ class CHAL(nn.Module):
                         (pred_ch_score - gt_ch_score) + EPS)
     loss_scale_type = loss / ((pred_al_score - gt_al_score) +
                               (pred_ch_score - gt_ch_score))
-    print("\n")
-    print("n_boxes | n_tokens | n_chunks", n_boxes,
-          n_tokens, n_chunks)
-    print("ch_box2idx\n", ch_box2idx)
-    print("\nidx2ch_box\n", idx2ch_box)
-    print("pred_ch_score - gt_ch_score", pred_ch_score - gt_ch_score)
-    print("pred_al_score - gt_al_score", pred_al_score - gt_al_score)
-    print("loss", loss)
-    print("joint loss_scale al/ch", loss_scale_joint)
-    print("type loss_scale bce/lamm", loss_scale_type)
-    print("mean weight scale al/ch", mean_scale)
-    print("")
-    input()
+    # print("\n")
+    # print("n_boxes | n_tokens | n_chunks", n_boxes,
+    #       n_tokens, n_chunks)
+    # print("ch_box2idx\n", ch_box2idx)
+    # print("\nidx2ch_box\n", idx2ch_box)
+    # print("pred_ch_score - gt_ch_score", pred_ch_score - gt_ch_score)
+    # print("pred_al_score - gt_al_score", pred_al_score - gt_al_score)
+    # print("loss", loss)
+    # print("joint loss_scale al/ch", loss_scale_joint)
+    # print("type loss_scale bce/lamm", loss_scale_type)
+    # print("mean weight scale al/ch", mean_scale)
+    # print("")
+    # input()
+    # loss_scale = 0.0001
 
-    loss_scale = 0.0001
+    loss_scale = 1.0
     loss = loss + (pred_ch_score*loss_scale + pred_al_score) - \
         (gt_ch_score*loss_scale + gt_al_score)
 
