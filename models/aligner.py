@@ -24,10 +24,12 @@ from util.model_utils import score_box
 from util.model_utils import makevar
 from util.model_utils import chunk_positional_encoding
 from util.model_utils import get_context_emmbedding
+from lxrt.entry import LXRTEncoder
 
 
 class ALIGNER(nn.Module):
-  def __init__(self, config, w2i, i2w):
+  def __init__(self, config, w2i, i2w,
+               args = None):
     super(ALIGNER, self).__init__()
     self.config = config
     self.wdim = self.config['word_dim']
@@ -39,6 +41,7 @@ class ALIGNER(nn.Module):
     self.context_vector = self.config['context_vector']
     self.context_embedding = self.config['context_embedding']
     self.use_bert = self.config['use_bert']
+    self.use_lxmert = self.config['use_lxmert']
 
     if config['nonlinearity'] == 'none':
       self.nonlinearity = None
@@ -91,6 +94,13 @@ class ALIGNER(nn.Module):
     if self.use_bert:
       self.bert = BERT(layer_number=11, method='sum')
       self.ph_dim += 768
+    if self.use_lxmert:
+      self.lxrt = LXRTEncoder(
+        args,
+        max_seq_length=config['max_length'],
+        mode = 'r'
+      )
+      self.ph_dim += 768
 
     self.contextualized = self.config['contextualized']
     if self.contextualized == 'bilstm':
@@ -133,7 +143,8 @@ class ALIGNER(nn.Module):
     self.criterion = nn.BCEWithLogitsLoss()
 
   def get_phrase_rep(self, sentence, pos_tags, start_idx, end_idx,
-                     sentence_context=None):
+                     sentence_context=None,
+                     visual_sentence_context=None):
 
     if self.contextualized:
       phrase_tokens = sentence_context[start_idx: end_idx, :]
@@ -141,6 +152,10 @@ class ALIGNER(nn.Module):
       phrase_rep_list = [phrase_sent_context]
     else:
       phrase_rep_list = []
+    if self.use_lxmert:
+      phrase_visual_tokens = visual_sentence_context[start_idx: end_idx, :]
+      phrase_visual_sent_context = torch.sum(phrase_visual_tokens, 0).unsqueeze(0)
+      phrase_rep_list += [phrase_visual_sent_context]
 
     emb_tokens = embed_symbols(
         self.w2i, self.We_wrd, sentence, start_idx, end_idx)
@@ -204,6 +219,12 @@ class ALIGNER(nn.Module):
     box_feats = torch.cat([box_feats, box_dummy], 0)
 
     n_boxes = cnn.size(0)
+    if self.use_lxmert:
+      lxrt_feat_seq, lxrt_pooled  = self.lxrt([' '.join(sentence)], (cnn.unsqueeze(0), spat[:,:4].unsqueeze(0)))
+      visual_sentence_context = lxrt_feat_seq.squeeze(0)[:len(sentence),:]
+    else:
+      visual_sentence_context = None
+
 
     grounded_chunks = []
     grounded_alignments = []
@@ -244,8 +265,9 @@ class ALIGNER(nn.Module):
       gold = makevar(np.array([expected]), numpy_var=True)
 
       phrase_rep = self.get_phrase_rep(
-          sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
-          sentence_context=sentence_context)
+        sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
+        sentence_context=sentence_context,
+        visual_sentence_context=visual_sentence_context)
       score_batch = self.score(phrase_rep, box_feats)
       loss += self.criterion(score_batch, gold)
 
