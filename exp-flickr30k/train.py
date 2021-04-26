@@ -3,6 +3,10 @@ import paths
 import os
 import pickle
 import sys
+import sys
+sys.path.append('..')
+sys.path.append('../ban_vqa/')
+sys.path.append('./lm_lstm_crf/')
 from random import shuffle, seed
 import h5py
 import numpy as np
@@ -10,14 +14,17 @@ from tqdm import tqdm
 
 import torch.optim as optim
 import torch
+from torch.utils.tensorboard import SummaryWriter
+writer = SummaryWriter("exp/logs/crf/")
 import torch.nn as nn
-
+sys.path.append(".")
+print(sys.path)
+#import util
 from util.reader import Reader
 from util.model_utils import get_box_feats, makevar, get_n_params, f1_score, alignment_score
 from util.arguments import get_flickr30k_train
 from models.get_model import get_model
 from util.model_utils import dump_tensors
-
 
 def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_metric='chunking', use_gt=False, use_predicted=False, details=False, max_length=50):
 
@@ -29,11 +36,18 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
   hit_align = 0.0
   count_align = 1.0
   torch.cuda.empty_cache()
+  output_chunks_dict={}
 
   for i in pbar:
-    words = split[0][i]
+    
     box_type = 'gt' if use_gt else 'pred'
     gt_chunks, gt_alignments, pos_tags = split[3][i]
+    words = split[0][i]
+    output_chunks_dict["id"]=i
+    resobj={}
+    resobj["sentence"] = words
+    resobj["gt_chunks"]=  gt_chunks 
+   
     if all([al == [] for al in gt_alignments[box_type]]):
       continue
     if (task_align and
@@ -71,12 +85,17 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
         hit_align += hit
         count_align += tot
 
-      pbar_str = 'L{:2d} chunk {:3.4f} alignment {:3.4f}'.format(len(words),
-                                                                 f1_chunk / count_chunk, hit_align / count_align)
+      pbar_str = 'L{:2d} chunk {:3.4f} alignment {:3.4f} hit_groundings {:6.4f} total_groundings {:6.4f}'.format(len(words),
+                                                                 f1_chunk / count_chunk, hit_align / count_align, hit_align, count_align)
       if details:
         pbar_str += '>>>> {} ||| {}'.format(pred_al_tuples, gt_al_tuples)
 
       pbar.set_description(pbar_str)
+
+      output_chunks_dict["result"] = resobj
+  
+  file_to_write = open("chunks_output.pickle", "wb")
+  pickle.dump(output_chunks_dict, file_to_write)
 
   metrics = {'chunking':  f1_chunk/count_chunk,
              'alignment': hit_align/count_align}
@@ -123,7 +142,9 @@ def train():
 
   else:
     net = torch.load(args.resume)
-    net.config['command'] += [config['command']]
+    #net.config['command'] += [config['command']]
+  print("printing model")
+  print(net)
   print('model loaded.')
 
   if config['optim'] == 'sgd':
@@ -143,19 +164,26 @@ def train():
 
   best_val = 0.0
   split = reader.data['trn']
+  print("split type", type(split))
 
   net.train()
   device = torch.device('cuda')
+  print("device ",device)
   net.to(device)
 
-  task_chunk = args.model in set(['chunker', 'chal'])
+  task_chunk = args.model in set(['chunker', 'chal','pipelinecrf'])
   task_align = args.model in set(
       ['aligner', 'chal', 'ban'])
   print('Tasks: chunk {} | align {}'.format(task_chunk, task_align))
+  printflag=1
   for epoch in range(args.epochs):
+    print("epoch ",epoch)
 
     length = args.val_freq if args.val_freq > 0 else len(split[0])
+
     total_length = len(split[0])
+    #total_length=100
+    print(total_length,length,epoch)
     indexes = range(total_length)
     shuf_idx = list(range(total_length))
     shuffle(shuf_idx)
@@ -178,6 +206,15 @@ def train():
 
       for i in pbar:
         idx = shuf_idx[i]
+        if(printflag):
+          print(split[0][idx])
+          print("next")
+          print(split[1][idx])
+          print("next")
+          print(split[2][idx])
+          print("next")
+          print(split[3][idx])
+          printflag =0
         words = split[0][idx]
         pred_boxes, gt_boxes = split[1][idx]
 
@@ -202,6 +239,7 @@ def train():
 
         loss, pred_chunks, pred_alignments = net.forward(
             words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type], debug=False)
+        #print("chunks",pred_chunks)
 
         gt_al_tuples = []
         for ch, al in zip(gt_chunks, gt_alignments[box_type]):
@@ -246,7 +284,13 @@ def train():
           else:
             pbar_str = 'E:{} best_val:{:3.4f} loss {:5.4f} ch_acc {:3.4f}'.format(
                 epoch+1, best_val, trn_loss, f1_chunk / count_chunk)
+            if(i%5000 ==0):
+              writer.add_scalar("Loss/train", trn_loss, update*length+i)
+              writer.add_scalar("ch_acc f1/train", f1_chunk / count_chunk, update*length+i)
+              print(pbar_str)
+              writer.flush()
           pbar.set_description(pbar_str)
+        
 
         optimizer.zero_grad()
         loss.backward()
@@ -254,8 +298,11 @@ def train():
         optimizer.step()
         torch.cuda.empty_cache()
 
+
       val_score = evaluate(
           net, reader.data['val'], box_data, task_chunk=task_chunk, task_align=task_align, target_metric='alignment' if task_align else 'chunking', use_gt=args.use_gt, use_predicted=args.use_predicted, details=args.details)
+      writer.add_scalar("val chunk_acc", val_score, update)
+      writer.flush()
       print('\nScore: {:3.4f}'.format(val_score))
       if best_val < val_score:
         torch.save(net, snapshot_model + '.best')
@@ -271,7 +318,7 @@ def train():
       else:
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters(
         )), lr=config['lr'], weight_decay=config['w_decay'])
-        torch.save(net, snapshot_model+'.EPOCH'+str(epoch))
+      torch.save(net, snapshot_model+'.EPOCH'+str(epoch))
 
 
 if __name__ == '__main__':

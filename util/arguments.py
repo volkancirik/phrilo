@@ -15,7 +15,7 @@ def get_flickr30k_train():
                       help='bottomup features for boxes, default: ../data/flickr30k.chunk_align.ban.cnn.h5')
 
   parser.add_argument('--model', dest='model',
-                      help='model type aligner|ban|chunker|chal default=chal', default='chal')
+                      help='model type aligner|ban|chunker|chal default=chal', default='aligner')
 
   parser.add_argument('--use-gt', dest='use_gt',
                       action='store_true', help='use gt boxes')
@@ -24,7 +24,7 @@ def get_flickr30k_train():
                       action='store_true', help='use pos tags as features')
 
   parser.add_argument('--use-bert', dest='use_bert',
-                      action='store_true', help='use bert encoder')
+                      action='store_true', help='use bert encoder',default = False)
 
   parser.add_argument('--encoder', dest='encoder',
                       help='phrase encoder average|bilstm|bilstm+att default=bilstm', default='bilstm')
@@ -50,29 +50,33 @@ def get_flickr30k_train():
   parser.add_argument('--no-finetune', dest='finetune',
                       action='store_false', help='do not finetune word embeddings')
 
-  parser.add_argument('--verbose', dest='verbose',
-                      action='store_true', help='print to stdout')
+  parser.add_argument('--verbose', dest='verbose', 
+                      action='store_true', help='print to stdout', default = 2)
+                     
+  parser.add_argument('--device', dest='device', 
+                      action='store_true', help='print to stdout', default =  'cuda' )
+                
 
   parser.add_argument('--epochs', type=int, default=10,
                       help='# of epochs, default = 10')
 
-  parser.add_argument('--val-freq', dest='val_freq', type=int, default=50000,
+  parser.add_argument('--val-freq', dest='val_freq', type=int, default=5000,
                       help='validate every n instances, 0 is for full pass over trn data, default = 50000')
 
   parser.add_argument('--save-path', dest='save_path', type=str,
-                      default='exp', help='folder to save experiment')
+                      default='exp/models_navya/aligner', help='folder to save experiment')
 
   parser.add_argument('--resume', dest='resume', type=str,
-                      default='', help='resume from this model snapshot')
+                       help='resume from this model snapshot', default = "exp/models_navya/aligner/16745_0.model.best")
 
   parser.add_argument('--clip', dest='clip',
                       help='gradient clipping, default=1.0', type=float, default=1.0)
 
   parser.add_argument('--optim', dest='optim',
-                      help='optimization method adam|sgd, default:sgd', default='sgd')
+                      help='optimization method adam|sgd, default:sgd', default='adam')
 
   parser.add_argument(
-      '--lr', dest='lr', help='initial learning rate, default = 0.0003', default=0.0001, type=float)
+      '--lr', dest='lr', help='initial learning rate, default = 0.0003', default=0.005, type=float)
 
   parser.add_argument('--lr-min', dest='lr_min',
                       help='minimum lr, default = 0.000001', default=0.000001, type=float)
@@ -84,13 +88,13 @@ def get_flickr30k_train():
                       help='weight decay, default = 0.0001', default=0.0001, type=float)
 
   parser.add_argument('--aligner', dest='aligner',
-                      help='aligner model', default='')
+                      help='aligner model', default='exp/models_navya/aligner/16745_0.model.best')
 
   parser.add_argument('--chunker', dest='chunker',
-                      help='chunker model', default='')
+                      help='chunker model', default='exp/23477_0.model.best')
 
   parser.add_argument('--nonlinearity', dest='nonlinearity',
-                      help='nonlinearity relu,sigmoid,tanh,none default=none', default='none')
+                      help='nonlinearity relu,sigmoid,tanh,none default=none', default='')
 
   parser.add_argument('--use-predicted', dest='use_predicted',
                       action='store_true', help='use predicted chunks')
@@ -99,7 +103,11 @@ def get_flickr30k_train():
                       action='store_true', help='print details to progress bar.')
 
   parser.add_argument('--max-length', type=int, default=20,
-                      help='max sentence length, default = 20')
+                      help='max sentence length, default = 20'), 
+                      
+  parser.add_argument('--wordwise_chunkingeval', dest="wordwise_chunkingeval", default=True,
+                      help='set to true to test for baseline with every word as chunk')
+                    
 
   args = parser.parse_args()
   return args

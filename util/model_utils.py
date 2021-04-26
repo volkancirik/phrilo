@@ -21,7 +21,23 @@ def encode_box(modulelist, W, box, ph_dim, nonlinearity):
       layer_in = ff(layer_in)
   return layer_in.resize(1, ph_dim)
 
-
+def convertPredstoChunks(pred):
+  pred=pred[0]
+  chunks=[]
+  prev_tag = -1
+  start=0
+  end=0
+  i=0
+  while(i<len(pred)):
+    if(pred[i]==0): 
+      start =i
+      end=i
+      while(i+1<len(pred) and pred[i+1]==1):
+        end +=1
+        i +=1
+      chunks += [(start, max(end, start))]
+    i +=1
+  return chunks
 def score_box(modulelist, layer_in, nonlinearity=None):
   for i, ff in enumerate(modulelist):
     if nonlinearity:
@@ -198,7 +214,44 @@ def weight_init(m):
   if len(m.size()) == 2 and m.requires_grad:
     xavier_uniform_(m)
 
+def f1_score_grounded(predicted, ground_truth, gt_alignments):
+  correct = 0.0
 
+  if isinstance(ground_truth[0], list):
+    ground_truth = [tuple(gt) for gt in ground_truth]    
+  if isinstance(predicted[0], list):
+    predicted = [tuple(pred) for pred in predicted]
+  #filtering only the chunks with grounded objects
+  ground_truth = [tuple(ground_truth[i]) for i  in range(len(ground_truth)) if  len(gt_alignments) == len(ground_truth) and len(gt_alignments[i])!=0]
+  ground_truth = set(ground_truth)
+  for chunk in predicted:
+    if chunk in ground_truth:
+      correct += 1.0
+  precision = correct / len(predicted)
+  recall = correct / len(ground_truth)
+  if not precision+recall:
+    return 0.0
+  f_one = 2*(precision*recall) / (precision + recall)
+  return recall
+def f1_score_np(predicted, ground_truth):
+  correct = 0.0
+
+  if isinstance(ground_truth[0], list):
+    ground_truth = [tuple(gt) for gt in ground_truth]
+
+  if isinstance(predicted[0], list):
+    predicted = [tuple(pred) for pred in predicted]
+
+  ground_truth = set(ground_truth)
+  for chunk in predicted:
+    if chunk in ground_truth:
+      correct += 1.0
+  precision = correct / len(predicted)
+  recall = correct / len(ground_truth)
+  if not precision+recall:
+    return 0.0
+  f_one = 2*(precision*recall) / (precision + recall)
+  return recall
 def f1_score(predicted, ground_truth):
   correct = 0.0
 
@@ -217,7 +270,7 @@ def f1_score(predicted, ground_truth):
   if not precision+recall:
     return 0.0
   f_one = 2*(precision*recall) / (precision + recall)
-  return f_one
+  return recall
 
 
 def alignment_score(predicted, ground_truth, use_predicted=0):
