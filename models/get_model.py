@@ -7,10 +7,12 @@ from util.model_utils import weight_init
 import torch
 
 
-def get_model(reader, config):
+def get_model(reader, config,
+              args = None):
 
   if config['model'] == 'aligner':
-    net = aligner.ALIGNER(config, reader.w2i, reader.i2w)
+    net = aligner.ALIGNER(config, reader.w2i, reader.i2w,
+                          args = args)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'ban':
     net = ban.BAN(config, reader.w2i, reader.i2w)

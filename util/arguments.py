@@ -26,8 +26,13 @@ def get_flickr30k_train():
   parser.add_argument('--use-bert', dest='use_bert',
                       action='store_true', help='use bert encoder',default = False)
 
+  parser.add_argument('--use-lxmert', dest='use_lxmert',
+                      action='store_true', help='use lxmert encoder')
+
   parser.add_argument('--encoder', dest='encoder',
                       help='phrase encoder average|bilstm|bilstm+att default=bilstm', default='bilstm')
+  parser.add_argument('--contextualized', dest='contextualized',
+                      help='sentence context encoder bilstm|bert default=""', default='')
 
   parser.add_argument('--hidden', dest='hid_dim', type=int,
                       help='# of hidden units, default = 128', default=128)
@@ -109,5 +114,19 @@ def get_flickr30k_train():
                       help='set to true to test for baseline with every word as chunk')
                     
 
+  parser.add_argument('--loadLXMERT', dest='load_lxmert', type=str, default='../lxmert/snap/pretrained/model_LXRT.pth',
+                      help='Load the pre-trained LXMERT model.')
+  parser.add_argument("--llayers", default=9, type=int,
+                      help='Number of Language layers')
+
+  parser.add_argument("--xlayers", default=5, type=int,
+                      help='Number of CROSS-modality layers.')
+
+  parser.add_argument("--rlayers", default=5, type=int,
+                      help='Number of object Relationship layers.')
+  parser.add_argument("--fromScratch", dest='from_scratch', action='store_const', default=False, const=True,help='If none of the --load, --loadLXMERT, --loadLXMERTQA is set, '
+                                            'the model would be trained from scratch. If --fromScratch is'
+                                            ' not specified, the model would load BERT-pre-trained weights by'
+                                            ' default. ')
   args = parser.parse_args()
   return args

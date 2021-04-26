@@ -138,7 +138,8 @@ def train():
   # create/load model
   print('loading model..')
   if args.resume == '':
-    net = get_model(reader, config)
+    net = get_model(reader, config,
+                    args = args)
 
   else:
     net = torch.load(args.resume)
