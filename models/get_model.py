@@ -6,24 +6,24 @@ import torch
 
 
 def get_model(reader, config,
-              args = None):
+              args=None):
 
   if config['model'] == 'aligner':
     net = aligner.ALIGNER(config, reader.w2i, reader.i2w,
-                          args = args)
+                          args=args)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'ban':
     net = ban.BAN(config, reader.w2i, reader.i2w)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'pipelineilp':
-    net = pipelineilp.PIPELINEILP(config)
+    net = pipelineilp.PIPELINEILP(config, reader)
   elif config['model'] == 'pipelinecrf':
     net = pipelinecrf.PIPELINECRF(config)
   elif config['model'] == 'chunker':
     net = chunker.CHUNKER(config, reader.w2i, reader.i2w)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'chal':
-    net = chal.CHAL(config)
+    net = chal.CHAL(config, reader)
   else:
     raise NotImplementedError()
 

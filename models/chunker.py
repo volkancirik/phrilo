@@ -21,6 +21,7 @@ from util.model_utils import chunk_positional_encoding
 from util.model_utils import get_context_emmbedding
 import pdb
 
+
 class CHUNKER(nn.Module):
   def __init__(self, config, w2i, i2w):
     super(CHUNKER, self).__init__()
@@ -87,8 +88,8 @@ class CHUNKER(nn.Module):
         mlist.append(nn.Linear(self.hdim, self.hdim))
     self.Wff = nn.ModuleList(mlist)
     nlp = spacy.load('en_core_web_sm')
-    #print('HERE!')
-    #pdb.set_trace()
+    # print('HERE!')
+    # pdb.set_trace()
     self.t2i = {t: i for i, t in enumerate(
         nlp.pipeline[1][1].labels + ('<go>', '<eos>', '<unk>'))}
     self.i2t = {i: t for i, t in enumerate(
@@ -160,7 +161,16 @@ class CHUNKER(nn.Module):
   def forward(self, sentence, pos_tags, _box_reps, gt_chunks, _gt_alignments, debug=False):
 
     n_tokens = len(sentence)
-    n_chunks = int((n_tokens*(n_tokens+1))/2)
+
+    if self.training:
+      # np.max([ch[1]-ch[0]+1 for ch in gt_chunks])
+      max_chunk_length = n_tokens
+    else:
+      max_chunk_length = n_tokens
+
+    leftover_length = max(n_tokens - max_chunk_length, 0)
+    n_max_len_chunks = int((leftover_length*(leftover_length+1))/2)
+    n_chunks = int((n_tokens*(n_tokens+1))/2) - n_max_len_chunks
 
     score = [None]*n_chunks
     score_np = np.zeros((1, n_chunks))
@@ -170,7 +180,7 @@ class CHUNKER(nn.Module):
 
     expected = [1.0]*n_chunks
     for i in range(0, n_tokens):
-      for j in range(i, n_tokens):
+      for j in range(i, min(n_tokens, i+max_chunk_length)):
 
         phrase_score, _ = self.score(sentence, pos_tags, i, j+1)
         if self.training and (i, j) not in gt_chunks:
@@ -180,8 +190,9 @@ class CHUNKER(nn.Module):
         score_np[0, idx] = phrase_score
 
         idx += 1
+
     pred_chunks, _, tok2chunks, id2chunk, chunk2id = self.decoder.solve(
-        score_np, n_tokens, None)
+        score_np, n_tokens, None, max_chunk_length=max_chunk_length)
 #    gold = makevar(np.array([expected]), numpy_var=True)
     # ch_score = torch.cat(score, 1)
     # loss = self.criterion(ch_score, gold)

@@ -29,7 +29,7 @@ from lxrt.entry import LXRTEncoder
 
 class ALIGNER(nn.Module):
   def __init__(self, config, w2i, i2w,
-               args = None):
+               args=None):
     super(ALIGNER, self).__init__()
     self.config = config
     self.wdim = self.config['word_dim']
@@ -96,9 +96,9 @@ class ALIGNER(nn.Module):
       self.ph_dim += 768
     if self.use_lxmert:
       self.lxrt = LXRTEncoder(
-        args,
-        max_seq_length=config['max_length'],
-        mode = 'r'
+          args,
+          max_seq_length=config['max_length'],
+          mode='r'
       )
       self.ph_dim += 768
 
@@ -154,7 +154,8 @@ class ALIGNER(nn.Module):
       phrase_rep_list = []
     if self.use_lxmert:
       phrase_visual_tokens = visual_sentence_context[start_idx: end_idx, :]
-      phrase_visual_sent_context = torch.sum(phrase_visual_tokens, 0).unsqueeze(0)
+      phrase_visual_sent_context = torch.sum(
+          phrase_visual_tokens, 0).unsqueeze(0)
       phrase_rep_list += [phrase_visual_sent_context]
 
     emb_tokens = embed_symbols(
@@ -198,17 +199,22 @@ class ALIGNER(nn.Module):
     n_boxes = box_feats.size(0)
     norm = prod / \
         (torch.norm(prod, 2, 1).view(n_boxes, 1)).expand_as(prod)
-    score_batch = score_box(self.Wfscore, norm)
+    score_batch = score_box(self.Wfscore, norm,
+                            nonlinearity=self.nonlinearity)
     return score_batch.view(1, n_boxes)
 
   def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
 
     if self.training:
-      self.decoder = LPAligner(max_boxes_per_chunk=4,
-                               min_boxes_per_chunk=1)
+      self.decoder = LPAligner(max_boxes_per_chunk=100,
+                               min_boxes_per_chunk=1,
+                               max_chunks_per_box=100,
+                               min_chunks_per_box=0)
     else:
       self.decoder = LPAligner(max_boxes_per_chunk=1,
-                               min_boxes_per_chunk=1)
+                               min_boxes_per_chunk=1,
+                               max_chunks_per_box=100,
+                               min_chunks_per_box=0)
 
     cnn, spat = box_reps
     feats = [cnn, spat]
@@ -218,13 +224,12 @@ class ALIGNER(nn.Module):
                         numpy_var=True)
     box_feats = torch.cat([box_feats, box_dummy], 0)
 
-    n_boxes = cnn.size(0)
     if self.use_lxmert:
-      lxrt_feat_seq, lxrt_pooled  = self.lxrt([' '.join(sentence)], (cnn.unsqueeze(0), spat[:,:4].unsqueeze(0)))
-      visual_sentence_context = lxrt_feat_seq.squeeze(0)[:len(sentence),:]
+      lxrt_feat_seq, lxrt_pooled = self.lxrt(
+          [' '.join(sentence)], (cnn.unsqueeze(0), spat[:, :4].unsqueeze(0)))
+      visual_sentence_context = lxrt_feat_seq.squeeze(0)[:len(sentence), :]
     else:
       visual_sentence_context = None
-
 
     grounded_chunks = []
     grounded_alignments = []
@@ -265,9 +270,9 @@ class ALIGNER(nn.Module):
       gold = makevar(np.array([expected]), numpy_var=True)
 
       phrase_rep = self.get_phrase_rep(
-        sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
-        sentence_context=sentence_context,
-        visual_sentence_context=visual_sentence_context)
+          sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
+          sentence_context=sentence_context,
+          visual_sentence_context=visual_sentence_context)
       score_batch = self.score(phrase_rep, box_feats)
       loss += self.criterion(score_batch, gold)
 
@@ -297,7 +302,10 @@ class ALIGNER(nn.Module):
         idx = box + n_boxes*ii
         gt_score += score_batch[0, idx]
 
-    loss = loss + pred_score - gt_score
+    mmloss = pred_score - gt_score
+    loss_scale = 0.1
+    #loss = loss + mmloss * loss_scale
+    loss = mmloss
 
     converted = defaultdict(list)
     for ch in pred_alignments[1]:
