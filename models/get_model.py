@@ -10,7 +10,9 @@ def get_model(reader, config,
 
   if config['model'] == 'aligner':
     net = aligner.ALIGNER(config, reader.w2i, reader.i2w,
-                          args=args)
+                          args=args,
+                          bce_loss=args.bce_loss,
+                          mmloss_scale=args.mmloss_scale)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'ban':
     net = ban.BAN(config, reader.w2i, reader.i2w)
@@ -20,10 +22,14 @@ def get_model(reader, config,
   elif config['model'] == 'pipelinecrf':
     net = pipelinecrf.PIPELINECRF(config)
   elif config['model'] == 'chunker':
-    net = chunker.CHUNKER(config, reader.w2i, reader.i2w)
+    net = chunker.CHUNKER(config, reader.w2i, reader.i2w,
+                          bce_loss=args.bce_loss,
+                          mmloss_scale=args.mmloss_scale)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'chal':
-    net = chal.CHAL(config, reader)
+    net = chal.CHAL(config, reader,
+                    bce_loss=args.bce_loss,
+                    mmloss_scale=args.mmloss_scale)
   else:
     raise NotImplementedError()
 

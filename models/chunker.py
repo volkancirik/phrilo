@@ -23,7 +23,9 @@ import pdb
 
 
 class CHUNKER(nn.Module):
-  def __init__(self, config, w2i, i2w):
+  def __init__(self, config, w2i, i2w,
+               bce_loss=0.0,
+               mmloss_scale=1.0):
     super(CHUNKER, self).__init__()
     self.config = config
 
@@ -121,6 +123,9 @@ class CHUNKER(nn.Module):
 
     self.Wpscore = nn.ModuleList(plist)
     self.criterion = nn.BCEWithLogitsLoss()
+    self.bce_loss = bce_loss
+    self.mmloss_scale = mmloss_scale
+
 
   def score(self, sentence, pos_tags, start_idx, end_idx):
     emb_tokens = embed_symbols(
@@ -163,10 +168,10 @@ class CHUNKER(nn.Module):
     n_tokens = len(sentence)
 
     if self.training:
-      # np.max([ch[1]-ch[0]+1 for ch in gt_chunks])
-      max_chunk_length = n_tokens
+      max_chunk_length = np.max([ch[1]-ch[0]+1 for ch in gt_chunks]) + 5 # arbitrary number
+      # max_chunk_length = 19
     else:
-      max_chunk_length = n_tokens
+      max_chunk_length = 10
 
     leftover_length = max(n_tokens - max_chunk_length, 0)
     n_max_len_chunks = int((leftover_length*(leftover_length+1))/2)
@@ -193,10 +198,10 @@ class CHUNKER(nn.Module):
 
     pred_chunks, _, tok2chunks, id2chunk, chunk2id = self.decoder.solve(
         score_np, n_tokens, None, max_chunk_length=max_chunk_length)
-#    gold = makevar(np.array([expected]), numpy_var=True)
-    # ch_score = torch.cat(score, 1)
-    # loss = self.criterion(ch_score, gold)
-    loss = 0
+
+    gold = makevar(np.array([expected]), numpy_var=True)
+    ch_score = torch.cat(score, 1)
+    bce_loss = self.criterion(ch_score, gold)
 
     pred_score = 0
     gt_score = 0
@@ -206,6 +211,7 @@ class CHUNKER(nn.Module):
     pred_chunks_set = set(pred_chunks)
     for chunk in gt_chunks:
       gt_score += score[chunk2id[chunk]]
-    loss = loss + pred_score - gt_score
+    mmloss = pred_score - gt_score
+    loss = bce_loss * self.bce_loss + mmloss * self.mmloss_scale
 
     return loss, pred_chunks, {}

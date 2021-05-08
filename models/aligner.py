@@ -29,7 +29,9 @@ from lxrt.entry import LXRTEncoder
 
 class ALIGNER(nn.Module):
   def __init__(self, config, w2i, i2w,
-               args=None):
+               args=None,
+               bce_loss=0.0,
+               mmloss_scale=1.0):
     super(ALIGNER, self).__init__()
     self.config = config
     self.wdim = self.config['word_dim']
@@ -141,6 +143,16 @@ class ALIGNER(nn.Module):
     self.Wfscore = nn.ModuleList(flist)
 
     self.criterion = nn.BCEWithLogitsLoss()
+    self.decoder_trn = LPAligner(max_boxes_per_chunk=100,
+                                 min_boxes_per_chunk=1,
+                                 max_chunks_per_box=100,
+                                 min_chunks_per_box=0)
+    self.decoder_tst = LPAligner(max_boxes_per_chunk=1,
+                                 min_boxes_per_chunk=1,
+                                 max_chunks_per_box=100,
+                                 min_chunks_per_box=0)
+    self.bce_loss = bce_loss
+    self.mmloss_scale = mmloss_scale
 
   def get_phrase_rep(self, sentence, pos_tags, start_idx, end_idx,
                      sentence_context=None,
@@ -206,15 +218,9 @@ class ALIGNER(nn.Module):
   def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
 
     if self.training:
-      self.decoder = LPAligner(max_boxes_per_chunk=100,
-                               min_boxes_per_chunk=1,
-                               max_chunks_per_box=100,
-                               min_chunks_per_box=0)
+      decoder = self.decoder_trn
     else:
-      self.decoder = LPAligner(max_boxes_per_chunk=1,
-                               min_boxes_per_chunk=1,
-                               max_chunks_per_box=100,
-                               min_chunks_per_box=0)
+      decoder = self.decoder_tst
 
     cnn, spat = box_reps
     feats = [cnn, spat]
@@ -243,7 +249,6 @@ class ALIGNER(nn.Module):
 
     scores_batch = []
     score_np_batch = np.zeros((1, n_boxes * n_chunks))
-    loss = 0.
 
     if self.contextualized:
       emb_tokens = embed_symbols(
@@ -274,7 +279,7 @@ class ALIGNER(nn.Module):
           sentence_context=sentence_context,
           visual_sentence_context=visual_sentence_context)
       score_batch = self.score(phrase_rep, box_feats)
-      loss += self.criterion(score_batch, gold)
+      bce_loss = self.criterion(score_batch, gold)
 
       augmentation = np.zeros((1, score_batch.size(1)))
       for k in range(n_boxes):
@@ -287,7 +292,7 @@ class ALIGNER(nn.Module):
                      n_boxes] = score_batch.data.cpu().numpy()
 
     score_batch = torch.cat(scores_batch, 1)
-    pred_alignments = self.decoder.solve(
+    pred_alignments = decoder.solve(
         score_np_batch, n_chunks, n_boxes)
     pred_score = 0.0
 
@@ -303,9 +308,8 @@ class ALIGNER(nn.Module):
         gt_score += score_batch[0, idx]
 
     mmloss = pred_score - gt_score
-    loss_scale = 0.1
-    #loss = loss + mmloss * loss_scale
-    loss = mmloss
+
+    loss = bce_loss * self.bce_loss + mmloss * self.mmloss_scale
 
     converted = defaultdict(list)
     for ch in pred_alignments[1]:

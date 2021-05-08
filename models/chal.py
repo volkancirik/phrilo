@@ -20,7 +20,10 @@ EPS = 1e-10
 
 
 class CHAL(nn.Module):
-  def __init__(self, config, reader):
+  def __init__(self, config, reader,
+               bce_loss=0.0,
+               mmloss_scale=1.0):
+
     super(CHAL, self).__init__()
     self.config = config
     aligner_meta_file = self.config['aligner'] + '.meta'
@@ -54,6 +57,8 @@ class CHAL(nn.Module):
                                         min_boxes_per_chunk=0,
                                         max_chunks_per_box=100,
                                         min_chunks_per_box=0)
+    self.bce_loss = bce_loss
+    self.mmloss_scale = mmloss_scale
 
   def load_weights(self, reader):
     print('Model weights are loading...')
@@ -176,7 +181,7 @@ class CHAL(nn.Module):
 
     gold = makevar(np.array([expected]), numpy_var=True)
     predicted = torch.cat(score, 1)
-    loss = self.criterion(predicted, gold)
+    bce_loss = self.criterion(predicted, gold)
 
     pred_chunks, pred_alignments, tok2chunks, id2chunk, chunk2id = decoder.solve(
         score_np, n_tokens, n_boxes, max_chunk_length=max_chunk_length)
@@ -209,8 +214,7 @@ class CHAL(nn.Module):
 
     mmloss_al = pred_al_score - gt_al_score
     mmloss_ch = pred_ch_score - gt_ch_score
-    loss_scale_al, loss_scale_ch = 0.01, 0.01
+    mmloss = mmloss_al + mmloss_ch
 
-    #loss = loss + loss_scale_al * mmloss_al + loss_scale_ch * mmloss_ch
-    loss = mmloss_al + loss_scale_ch * mmloss_ch
+    loss = bce_loss * self.bce_loss + mmloss * self.mmloss_scale
     return loss, pred_chunks, converted

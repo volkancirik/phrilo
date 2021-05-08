@@ -77,6 +77,12 @@ def get_flickr30k_train(return_parser=False):
                       help='optimization method adam|sgd, default:sgd', default='sgd')
 
   parser.add_argument(
+      '--bce-loss', dest='bce_loss', help='bce loss weight, default = 0.', default=0., type=float)
+
+  parser.add_argument(
+      '--mmloss-scale', dest='mmloss_scale', help='max-margin loss scale, default = 1.', default=1., type=float)
+
+  parser.add_argument(
       '--lr', dest='lr', help='initial learning rate, default = 0.0003', default=0.0001, type=float)
 
   parser.add_argument('--lr-min', dest='lr_min',
