@@ -48,6 +48,18 @@ def countgt_chunksize(gt_chunks_arr):
 
 
 
+def gestStats(split,box_data):
+  pbar = tqdm(list(range(len(split[0]))))
+  sentence_map={}
+  for i in pbar:
+    words = split[0][i]
+    gt_alignments = split[3][i]
+    sentence= " ".join(words)
+    sentence_map[sentence]= gt_alignments
+  file_to_write=open("devset_stats_phrilo_old.pkl","wb")
+  pickle.dump(sentence_map, file_to_write)
+  print("NUm caption in dev ", len(sentence_map))
+
 
 def evaluate(net, split, box_data,args,
              task_chunk=False, task_align=False, target_metric="chunking",
@@ -77,6 +89,7 @@ def evaluate(net, split, box_data,args,
     
     resobj={}
     resobj["sentence"] = words
+
     resobj["gt_chunks"]=  gt_chunks 
     #print("gt_chunks",gt_chunks)
     #print("and preds")
@@ -109,6 +122,14 @@ def evaluate(net, split, box_data,args,
         f1_chunk_wordlevel += f1_score(pred_chunks, gt_chunks)
       count_chunk += 1
     if task_align and gt_al_tuples:
+      sentence = " ".join(words)
+      target_sentence= ["a boy in a red shirt and a boy in a yellow shirt are jumping on a trampoline outside ."]
+      target_sentence.append("two religious men glancing off to their right while standing in front of a church .")
+      target_sentence.append("a closeup shot of a long-haired man playing a red electric guitar .")
+      target_sentence.append("several men and women stand in front of a yellow table that is covered in piles of potatoes .")
+      target_sentence.append("the two tan colored dogs are in a field , and one is jumping in the air .")
+      if(sentence in target_sentence): 
+        print("yay")
       hit, tot = alignment_score(
           pred_al_tuples, gt_al_tuples, use_predicted=box_reps[0].size(0))
       hit_align += hit
@@ -125,7 +146,7 @@ def evaluate(net, split, box_data,args,
   
   file_to_write = open("chunks_output.pickle", "wb")
   pickle.dump(output_chunks_dict, file_to_write)
-    #print(pbar_str)
+  #print(pbar_str)
   metrics = {"chunking":  f1_chunk/count_chunk,
              "chunking_grounded" : f1_chunk_grounded/count_chunk,
              "alignment": hit_align/count_align}
@@ -179,10 +200,11 @@ def train():
   task_align = args.model in set(
       ["aligner", "ban", "chal", "pipelinecrf", "pipelineilp"])
   print("Tasks: chunk {} | align {}".format(task_chunk, task_align))
+  gestStats(reader.data['val'], box_data)
 
-  val_score = evaluate(
-      net, reader.data['val'], box_data,args, task_chunk=task_chunk, task_align=task_align, target_metric="alignment" if task_align else "chunking", use_gt=args.use_gt, use_predicted=args.use_predicted, details=args.details)
-  print("\nVal Scores: chunking:{:3.4f}, chunking_ggrounded:{:3.4f}, allignment:{:3.4f} ".format(val_score["chunking"],val_score["chunking_grounded"],val_score["alignment"]))
+  # val_score = evaluate(
+  #     net, reader.data['val'], box_data,args, task_chunk=task_chunk, task_align=task_align, target_metric="alignment" if task_align else "chunking", use_gt=args.use_gt, use_predicted=args.use_predicted, details=args.details)
+  # print("\nVal Scores: chunking:{:3.4f}, chunking_ggrounded:{:3.4f}, allignment:{:3.4f} ".format(val_score["chunking"],val_score["chunking_grounded"],val_score["alignment"]))
   
 
 if __name__ == '__main__':

@@ -7,6 +7,8 @@ import sys
 sys.path.append('..')
 sys.path.append('../ban_vqa/')
 sys.path.append('./lm_lstm_crf/')
+sys.path.append('../lxmert/src/')
+print(sys.path)
 from random import shuffle, seed
 import h5py
 import numpy as np
@@ -15,7 +17,7 @@ from tqdm import tqdm
 import torch.optim as optim
 import torch
 from torch.utils.tensorboard import SummaryWriter
-writer = SummaryWriter("exp/logs/crf/")
+writer = SummaryWriter("exp/logs/aligner/")
 import torch.nn as nn
 sys.path.append(".")
 print(sys.path)
@@ -36,17 +38,12 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
   hit_align = 0.0
   count_align = 1.0
   torch.cuda.empty_cache()
-  output_chunks_dict={}
 
   for i in pbar:
     
     box_type = 'gt' if use_gt else 'pred'
     gt_chunks, gt_alignments, pos_tags = split[3][i]
     words = split[0][i]
-    output_chunks_dict["id"]=i
-    resobj={}
-    resobj["sentence"] = words
-    resobj["gt_chunks"]=  gt_chunks 
    
     if all([al == [] for al in gt_alignments[box_type]]):
       continue
@@ -61,7 +58,7 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
       box_reps = get_box_feats(
           boxes, box_data, box_type, volatile=True)
       loss, pred_chunks, pred_alignments = net.forward(
-          words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type], debug=False)
+          words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type],  debug=False)
       n_boxes = int(box_reps[0].size(0))
       torch.cuda.empty_cache()
 
@@ -85,17 +82,13 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
         hit_align += hit
         count_align += tot
 
-      pbar_str = 'L{:2d} chunk {:3.4f} alignment {:3.4f} hit_groundings {:6.4f} total_groundings {:6.4f}'.format(len(words),
-                                                                 f1_chunk / count_chunk, hit_align / count_align, hit_align, count_align)
+      pbar_str = 'L{:2d} chunk {:3.4f} alignment {:3.4f}'.format(len(words),
+                                                                 f1_chunk / count_chunk, hit_align / count_align )
       if details:
         pbar_str += '>>>> {} ||| {}'.format(pred_al_tuples, gt_al_tuples)
-
-      pbar.set_description(pbar_str)
-
-      output_chunks_dict["result"] = resobj
+      if(i%100==0):
+        pbar.set_description(pbar_str)
   
-  file_to_write = open("chunks_output.pickle", "wb")
-  pickle.dump(output_chunks_dict, file_to_write)
 
   metrics = {'chunking':  f1_chunk/count_chunk,
              'alignment': hit_align/count_align}
@@ -105,6 +98,8 @@ def evaluate(net, split, box_data, task_chunk=False, task_align=False, target_me
 
 def train():
   seed(2)
+  os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152
+  os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
   args = get_flickr30k_train()
   config = vars(args)
@@ -238,8 +233,10 @@ def train():
             if al == []:
               gt_alignments[box_type][jj] = [box_reps[0].size(0)]
 
-        loss, pred_chunks, pred_alignments = net.forward(
-            words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type], debug=False)
+        loss_obj, pred_chunks, pred_alignments = net.forward(
+            words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type],debug=False)
+        loss= loss_obj['tot_loss']
+        loss_ca= loss_obj['loss_ca']
         #print("chunks",pred_chunks)
 
         gt_al_tuples = []
@@ -275,24 +272,29 @@ def train():
 
         if args.verbose:
           if task_align:
-            pbar_str = 'E:{} best_val:{:3.4f} loss {:5.4f} L{:2d} ch_acc {:3.4f} al_acc {:3.4f}'.format(
-                epoch+1, best_val, trn_loss, len(words), f1_chunk / count_chunk, hit_align / count_align)
+            pbar_str = 'E:{} best_val:{:3.4f} loss {:5.4f} loss_ca {:5.4f} L{:2d} ch_acc {:3.4f} al_acc {:3.4f}'.format(
+                epoch+1, best_val, trn_loss, loss_ca,len(words), f1_chunk / count_chunk, hit_align / count_align)
             if args.use_predicted:
               pbar_str += ' gr_al_acc {:3.4f}'.format(
                   hit_align_predicted / count_align_predicted)
             if args.details:
               pbar_str += '>>>> {} ||| {}'.format(pred_al_tuples, gt_al_tuples)
+            if(i%500 ==0):
+              writer.add_scalar("Loss/train", trn_loss, update*length+i)
+              writer.add_scalar("Loss_ca/train", loss_ca, update*length+i)
+              
+              #print(pbar_str)
+              writer.flush()
           else:
             pbar_str = 'E:{} best_val:{:3.4f} loss {:5.4f} ch_acc {:3.4f}'.format(
                 epoch+1, best_val, trn_loss, f1_chunk / count_chunk)
-            if(i%5000 ==0):
+            
+            if(i%100 ==0):
               writer.add_scalar("Loss/train", trn_loss, update*length+i)
               writer.add_scalar("ch_acc f1/train", f1_chunk / count_chunk, update*length+i)
               print(pbar_str)
               writer.flush()
-          pbar.set_description(pbar_str)
-        
-
+        pbar.set_description(pbar_str)
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(net.parameters(), config['clip'])
@@ -302,7 +304,7 @@ def train():
 
       val_score = evaluate(
           net, reader.data['val'], box_data, task_chunk=task_chunk, task_align=task_align, target_metric='alignment' if task_align else 'chunking', use_gt=args.use_gt, use_predicted=args.use_predicted, details=args.details)
-      writer.add_scalar("val chunk_acc", val_score, update)
+      writer.add_scalar("val acc", val_score, update)
       writer.flush()
       print('\nScore: {:3.4f}'.format(val_score))
       if best_val < val_score:
