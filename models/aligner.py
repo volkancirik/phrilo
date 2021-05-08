@@ -13,6 +13,8 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 from torch.nn.utils.weight_norm import weight_norm
+import sys
+sys.path.append('lxmert/src/')
 
 from models.lp_solvers import LPAligner
 from models.composer import COMPOSER, DAN, BILSTM, BERT
@@ -26,10 +28,9 @@ from util.model_utils import chunk_positional_encoding
 from util.model_utils import get_context_emmbedding
 from lxrt.entry import LXRTEncoder
 
-
 class ALIGNER(nn.Module):
   def __init__(self, config, w2i, i2w,
-               args = None):
+               args=None):
     super(ALIGNER, self).__init__()
     self.config = config
     self.wdim = self.config['word_dim']
@@ -42,6 +43,11 @@ class ALIGNER(nn.Module):
     self.context_embedding = self.config['context_embedding']
     self.use_bert = self.config['use_bert']
     self.use_lxmert = self.config['use_lxmert']
+    self.temperature =0.07
+    self.contrastive_hdim = 100
+
+
+            
 
     if config['nonlinearity'] == 'none':
       self.nonlinearity = None
@@ -70,6 +76,8 @@ class ALIGNER(nn.Module):
         nlp.pipeline[1][1].labels + ('<go>', '<eos>', '<unk>'))}
     self.We_pos = nn.Embedding(len(self.t2i), self.wdim)
 
+    self.token_dim =0
+
     self.pos_dim = 32
     context_dim = 4*self.pos_dim
     if self.context_vector:
@@ -88,19 +96,22 @@ class ALIGNER(nn.Module):
     elif self.encoder == 'bilstm':
       self.ph_rnn = BILSTM(self.wdim * self.pos_coeff, self.hdim)
       self.ph_dim = self.hdim * 2
+      self.token_dim = self.hdim * 2
     else:
       raise NotImplementedError()
     self.ph_dim += context_dim
     if self.use_bert:
       self.bert = BERT(layer_number=11, method='sum')
       self.ph_dim += 768
+      #self.token_dim += 768
     if self.use_lxmert:
       self.lxrt = LXRTEncoder(
-        args,
-        max_seq_length=config['max_length'],
-        mode = 'r'
+          args,
+          max_seq_length=config['max_length'],
+          mode='r'
       )
       self.ph_dim += 768
+      self.token_dim += 768
 
     self.contextualized = self.config['contextualized']
     if self.contextualized == 'bilstm':
@@ -109,6 +120,8 @@ class ALIGNER(nn.Module):
     elif self.contextualized == 'bert':
       self.context_fn = BERT(layer_number=11, method='sum')
       self.ph_dim += 768
+    self.contrastive_align_projection_image = nn.Linear(self.bdim, self.contrastive_hdim)
+    self.contrastive_align_projection_text = nn.Linear(self.token_dim, self.contrastive_hdim)
 
     plist = []
     for i in range(self.layer):
@@ -125,6 +138,7 @@ class ALIGNER(nn.Module):
         plist.append(nn.Linear(self.hdim, self.hdim))
     self.Wpscore = nn.ModuleList(plist)
 
+  
     flist = []
     for i in range(self.layer):
       if i == self.layer-1 and i == 0:
@@ -141,10 +155,32 @@ class ALIGNER(nn.Module):
     self.Wfscore = nn.ModuleList(flist)
 
     self.criterion = nn.BCEWithLogitsLoss()
+  def get_sent_tokens_rep(self, sentence, pos_tags, start_idx, end_idx,
+                     visual_sentence_context=None,return_seq=False):
+    emb_tokens = embed_symbols(
+        self.w2i, self.We_wrd, sentence, start_idx, end_idx)
+    if self.use_pos:
+      emb_tags = embed_symbols(
+          self.t2i, self.We_pos, pos_tags, start_idx, end_idx)
+      emb_rep = torch.cat([torch.cat(emb_tags, 0),
+                           torch.cat(emb_tokens, 0)], 1)
+    else:
+      emb_rep = torch.cat(emb_tokens, 0)
+    seq_bilstm_rep, _ = self.ph_rnn(emb_rep,return_seq=True)
+    # if self.use_bert:
+    #   seq_bert_rep = self.bert(sentence,return_seq=True)
+    #   seq_sent_rep= torch.cat((seq_sent_rep,seq_bert_rep),dim=1)
+    if(self.use_lxmert):
+      seq_sent_rep = torch.cat((seq_bilstm_rep,visual_sentence_context), dim=1)
+    else:
+      seq_sent_rep = seq_bilstm_rep
+
+    return seq_sent_rep
+
 
   def get_phrase_rep(self, sentence, pos_tags, start_idx, end_idx,
                      sentence_context=None,
-                     visual_sentence_context=None):
+                     visual_sentence_context=None,return_seq=False):
 
     if self.contextualized:
       phrase_tokens = sentence_context[start_idx: end_idx, :]
@@ -154,7 +190,8 @@ class ALIGNER(nn.Module):
       phrase_rep_list = []
     if self.use_lxmert:
       phrase_visual_tokens = visual_sentence_context[start_idx: end_idx, :]
-      phrase_visual_sent_context = torch.sum(phrase_visual_tokens, 0).unsqueeze(0)
+      phrase_visual_sent_context = torch.sum(
+          phrase_visual_tokens, 0).unsqueeze(0)
       phrase_rep_list += [phrase_visual_sent_context]
 
     emb_tokens = embed_symbols(
@@ -167,6 +204,7 @@ class ALIGNER(nn.Module):
     else:
       emb_rep = torch.cat(emb_tokens, 0)
     phrase, _ = self.ph_rnn(emb_rep)
+    #self.sentence_toks_rep= sentence_toks_rep
 
     phrase_feats = chunk_positional_encoding(start_idx, end_idx, self.pos_dim)
     phrase_rep_list += [phrase, phrase_feats]
@@ -198,17 +236,99 @@ class ALIGNER(nn.Module):
     n_boxes = box_feats.size(0)
     norm = prod / \
         (torch.norm(prod, 2, 1).view(n_boxes, 1)).expand_as(prod)
-    score_batch = score_box(self.Wfscore, norm)
+    score_batch = score_box(self.Wfscore, norm,
+                            nonlinearity=self.nonlinearity)
     return score_batch.view(1, n_boxes)
+  def loss_contrastive_align(self, tokens_reps, queries_reps,n_chunks,n_boxes,gt_chunks,gt_alignments):
+        if(n_boxes==0): return 0
+        bs = tokens_reps.shape[0]
+        num_tokens=   tokens_reps.shape[1]
+        num_queries=   queries_reps.shape[1]
+
+        
+        normalized_text_emb = tokens_reps/torch.norm(tokens_reps,2,2,keepdim=True)  # BS x (num_tokens) x hdim
+        normalized_img_emb = queries_reps/torch.norm(queries_reps,2,2,keepdim=True)   # BS x (num_queries) x hdim
+
+        logits = (
+            torch.matmul(normalized_img_emb, normalized_text_emb.transpose(-1, -2)) / self.temperature
+        )  # BS x (num_queries) x (num_tokens)
+        
+        # construct a map such that positive_map[k, i,j] = True iff query i is associated to token j in batch item k
+        # For efficency, the construction happens on CPU, then the whole matrix is transferred to GPU in one go.
+        positive_map = torch.zeros(logits.shape, dtype=torch.bool)
+        for k in range(bs):
+          for j,chunk in enumerate(gt_chunks):
+            if(len(gt_alignments[j])==0):
+              #assignimng dumy null box to chunks without any grounded alignment. Last box is the null box
+              start = chunk[0]
+              end = chunk[1]
+              tok = start
+              box=num_queries-1
+              while(tok <= end):
+                positive_map[k,box,tok]= True 
+                tok +=1 
+
+            else:
+              for box in gt_alignments[j]:
+                start = chunk[0]
+                end = chunk[1]
+                tok = start
+                if(box>=num_queries):
+                  continue
+                while(tok <= end):
+                  positive_map[k,box,tok]= True 
+                  tok +=1 
+
+        # for k in range(bs):
+        #   for ii in range(n_chunks):          
+        #     for box in grounded_alignments[ii]:
+        #       start = grounded_chunks[ii][0]
+        #       end = grounded_chunks[ii][1]
+        #       tok = start
+        #       if(box>=num_queries):
+        #         continue
+        #       while(tok <= end):
+              
+        #         positive_map[k,box,tok]= True 
+        #         tok +=1
+             
+       
+        positive_map = positive_map.to(logits.device)
+        positive_logits = -logits.masked_fill(~positive_map, 0)
+        negative_logits = logits  # .masked_fill(positive_map, -1000000)
+
+        boxes_with_pos = positive_map.any(2)
+        pos_term = positive_logits.sum(2)
+        neg_term = negative_logits.logsumexp(2)
+
+        nb_pos = positive_map.sum(2) + 1e-6
+
+        box_to_token_loss = ((pos_term / nb_pos + neg_term)).masked_fill(~boxes_with_pos, 0).sum()
+
+        tokens_with_pos = positive_map.any(1)
+        pos_term = positive_logits.sum(1)
+        neg_term = negative_logits.logsumexp(1)
+
+        nb_pos = positive_map.sum(1) + 1e-6
+
+        tokens_to_boxes_loss = ((pos_term / nb_pos + neg_term)).masked_fill(~tokens_with_pos, 0).sum()
+        tot_loss = (box_to_token_loss + tokens_to_boxes_loss) / 2
+
+        return tot_loss / n_boxes
+        
 
   def forward(self, sentence, pos_tags, box_reps, gt_chunks, gt_alignments, debug=False):
 
     if self.training:
-      self.decoder = LPAligner(max_boxes_per_chunk=4,
-                               min_boxes_per_chunk=1)
+      self.decoder = LPAligner(max_boxes_per_chunk=100,
+                               min_boxes_per_chunk=1,
+                               max_chunks_per_box=100,
+                               min_chunks_per_box=0)
     else:
       self.decoder = LPAligner(max_boxes_per_chunk=1,
-                               min_boxes_per_chunk=1)
+                               min_boxes_per_chunk=1,
+                               max_chunks_per_box=100,
+                               min_chunks_per_box=0)
 
     cnn, spat = box_reps
     feats = [cnn, spat]
@@ -218,13 +338,14 @@ class ALIGNER(nn.Module):
                         numpy_var=True)
     box_feats = torch.cat([box_feats, box_dummy], 0)
 
-    n_boxes = cnn.size(0)
     if self.use_lxmert:
-      lxrt_feat_seq, lxrt_pooled  = self.lxrt([' '.join(sentence)], (cnn.unsqueeze(0), spat[:,:4].unsqueeze(0)))
-      visual_sentence_context = lxrt_feat_seq.squeeze(0)[:len(sentence),:]
+      lxrt_feat_seq, lxrt_pooled = self.lxrt(
+          [' '.join(sentence)], (cnn.unsqueeze(0), spat[:, :4].unsqueeze(0)))
+      visual_sentence_context = lxrt_feat_seq.squeeze(0)[:len(sentence), :]
     else:
       visual_sentence_context = None
-
+    sent_tokens_reps = self.get_sent_tokens_rep( sentence, pos_tags, 0, len(sentence),
+                     visual_sentence_context,return_seq=True)
 
     grounded_chunks = []
     grounded_alignments = []
@@ -248,6 +369,7 @@ class ALIGNER(nn.Module):
             self.t2i, self.We_pos, pos_tags, 0, len(sentence))
         emb_rep = torch.cat([torch.cat(emb_tags, 0),
                              torch.cat(emb_tokens, 0)], 1)
+       
 
         sentence_context, _ = self.context_fn(emb_rep,
                                               return_seq=True)
@@ -265,9 +387,9 @@ class ALIGNER(nn.Module):
       gold = makevar(np.array([expected]), numpy_var=True)
 
       phrase_rep = self.get_phrase_rep(
-        sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
-        sentence_context=sentence_context,
-        visual_sentence_context=visual_sentence_context)
+          sentence, pos_tags, grounded_chunks[ii][0], grounded_chunks[ii][1]+1,
+          sentence_context=sentence_context,
+          visual_sentence_context=visual_sentence_context)
       score_batch = self.score(phrase_rep, box_feats)
       loss += self.criterion(score_batch, gold)
 
@@ -297,10 +419,21 @@ class ALIGNER(nn.Module):
         idx = box + n_boxes*ii
         gt_score += score_batch[0, idx]
 
-    loss = loss + pred_score - gt_score
+    mmloss = pred_score - gt_score
+    loss_scale = 0.5
+    loss = loss + mmloss * loss_scale
+    #loss = 0.5*mmloss
 
+    #project token reps to the same space as query object prepresentations
+    queries_reps = self.contrastive_align_projection_image(box_feats)
+    tokens_reps= self.contrastive_align_projection_text(sent_tokens_reps)
+    #loss_ca= self.loss_contrastive_align(tokens_reps.unsqueeze(0),queries_reps.unsqueeze(0), n_chunks,n_boxes,gt_chunks, gt_alignments)
+    loss_ca=0
+    loss += loss_ca
     converted = defaultdict(list)
     for ch in pred_alignments[1]:
       converted[grounded_chunks[ch]] = pred_alignments[1][ch]
 
-    return loss, [], converted
+    loss_obj={'tot_loss':loss , "loss_ca":loss_ca} 
+
+    return loss_obj, [], converted
