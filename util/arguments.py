@@ -15,7 +15,7 @@ def get_flickr30k_train():
                       help='bottomup features for boxes, default: ../data/flickr30k.chunk_align.ban.cnn.h5')
 
   parser.add_argument('--model', dest='model',
-                      help='model type aligner|ban|chunker|chal default=chal', default='aligner')
+                      help='model type aligner|ban|chunker|chal default=chal', default='chunker')
 
   parser.add_argument('--use-gt', dest='use_gt',
                       action='store_true', help='use gt boxes')
@@ -48,6 +48,8 @@ def get_flickr30k_train():
 
   parser.add_argument('--word-dim', dest='word_dim', type=int,
                       help='dimension for word embeddings, default = 300', default=300)
+  parser.add_argument('--maxlen_phrase', dest='maxlen_phrase', type=int,
+                      help='maximum length of a chunk, default = 300', default=5)
 
   parser.add_argument('--box-dim', dest='box_dim', type=int,
                       help='dimension for box representations, default = 2048+6', default=2048+6)
@@ -69,16 +71,16 @@ def get_flickr30k_train():
                       help='validate every n instances, 0 is for full pass over trn data, default = 50000')
 
   parser.add_argument('--save-path', dest='save_path', type=str,
-                      default='exp/models_navya/aligner', help='folder to save experiment')
+                      default='exp/models_navya/chunker/', help='folder to save experiment')
 
   parser.add_argument('--resume', dest='resume', type=str,
-                       help='resume from this model snapshot', default = "exp/models_navya/aligner/16745_0.model.best")
+                       help='resume from this model snapshot', default = "")
 
   parser.add_argument('--clip', dest='clip',
                       help='gradient clipping, default=1.0', type=float, default=1.0)
 
   parser.add_argument('--optim', dest='optim',
-                      help='optimization method adam|sgd, default:sgd', default='adam')
+                      help='optimization method adam|sgd, default:sgd', default='sgd')
 
   parser.add_argument(
       '--lr', dest='lr', help='initial learning rate, default = 0.0003', default=0.005, type=float)
@@ -93,13 +95,13 @@ def get_flickr30k_train():
                       help='weight decay, default = 0.0001', default=0.0001, type=float)
 
   parser.add_argument('--aligner', dest='aligner',
-                      help='aligner model', default='exp/models_navya/aligner/16745_0.model.best')
+                      help='aligner model', default='exp/models_navya/aligner/23911_0.model.best')
 
   parser.add_argument('--chunker', dest='chunker',
                       help='chunker model', default='exp/23477_0.model.best')
 
   parser.add_argument('--nonlinearity', dest='nonlinearity',
-                      help='nonlinearity relu,sigmoid,tanh,none default=none', default='')
+                      help='nonlinearity relu,sigmoid,tanh,none default=none', default='relu')
 
   parser.add_argument('--use-predicted', dest='use_predicted',
                       action='store_true', help='use predicted chunks')

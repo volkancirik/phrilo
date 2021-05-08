@@ -1,7 +1,7 @@
 #from __future__ import absolute_import,print_function
 
-from models import aligner, pipelineilp, chal, chunker,bilstm_crf
-#from models import aligner, pipelineilp, chal, chunker
+from models import aligner, pipelineilp, chal, chunker
+#from models import aligner, pipelineilp, chal, chunker,,bilstm_crf
 
 from util.model_utils import weight_init
 import torch
@@ -45,6 +45,6 @@ def get_model(reader, config,
     if config['model'] in set(['aligner', 'ban', 'chunker']):
       net.We_wrd.weight.requires_grad = False
   net.cuda()
-  for param in net.parameters():
+  for param in net.parameters(): 
     weight_init(param)
   return net

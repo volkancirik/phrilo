@@ -34,6 +34,7 @@ class CHUNKER(nn.Module):
     self.context_vector = self.config['context_vector']
     self.context_embedding = self.config['context_embedding']
     self.use_bert = self.config['use_bert']
+    self.maxlen_phrase= self.config['maxlen_phrase']
 
     self.RELU = nn.ReLU()
     self.TANH = nn.Tanh()
@@ -157,7 +158,7 @@ class CHUNKER(nn.Module):
         self.Wpscore, phrase_rep, self.layer, self.nonlinearity)
     return phrase_score, phrase_rep
 
-  def forward(self, sentence, pos_tags, _box_reps, gt_chunks, _gt_alignments, debug=False):
+  def forward(self, sentence, pos_tags, _box_reps, gt_chunks, _gt_alignments,  debug=False):
 
     n_tokens = len(sentence)
     n_chunks = int((n_tokens*(n_tokens+1))/2)
@@ -170,7 +171,7 @@ class CHUNKER(nn.Module):
 
     expected = [1.0]*n_chunks
     for i in range(0, n_tokens):
-      for j in range(i, n_tokens):
+      for j in range(i, min(n_tokens,n_tokens)):
 
         phrase_score, _ = self.score(sentence, pos_tags, i, j+1)
         if self.training and (i, j) not in gt_chunks:
