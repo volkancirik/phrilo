@@ -8,17 +8,17 @@ import torch
 
 
 def get_model(reader, config,
-              args = None):
+              args=None):
 
   if config['model'] == 'aligner':
     net = aligner.ALIGNER(config, reader.w2i, reader.i2w,
-                          args = args)
+                          args=args)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'ban':
     net = ban.BAN(config, reader.w2i, reader.i2w)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'pipelineilp':
-    net = pipelineilp.PIPELINEILP(config)
+    net = pipelineilp.PIPELINEILP(config, reader)
   elif config['model'] == 'pipelinecrf':
     net = pipelinecrf.PIPELINECRF(config,reader.w2i, reader.i2w)
   elif config['model'] == 'chunker':
@@ -26,7 +26,7 @@ def get_model(reader, config,
     net = chunker.CHUNKER(config, reader.w2i, reader.i2w)
     net.We_wrd.weight.data.copy_(torch.from_numpy(reader.vectors).cuda())
   elif config['model'] == 'chal':
-    net = chal.CHAL(config)
+    net = chal.CHAL(config,reader)
   elif config['model'] == 'bilstm_crf':
     tag_to_ix = {"B": 0, "I": 1,  "<START>": 2, "<END>": 3}
     reader.w2i['<UNK>']= len(reader.w2i)

@@ -2,7 +2,7 @@
 import argparse
 
 
-def get_flickr30k_train():
+def get_flickr30k_train(return_parser=False):
   parser = argparse.ArgumentParser()
 
   parser.add_argument('--root', dest='root',
@@ -126,9 +126,11 @@ def get_flickr30k_train():
 
   parser.add_argument("--rlayers", default=5, type=int,
                       help='Number of object Relationship layers.')
-  parser.add_argument("--fromScratch", dest='from_scratch', action='store_const', default=False, const=True,help='If none of the --load, --loadLXMERT, --loadLXMERTQA is set, '
+  parser.add_argument("--fromScratch", dest='from_scratch', action='store_const', default=False, const=True, help='If none of the --load, --loadLXMERT, --loadLXMERTQA is set, '
                                             'the model would be trained from scratch. If --fromScratch is'
                                             ' not specified, the model would load BERT-pre-trained weights by'
                                             ' default. ')
   args = parser.parse_args()
+  if return_parser:
+    return parser
   return args

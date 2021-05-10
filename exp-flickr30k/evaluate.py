@@ -1,20 +1,22 @@
 from __future__ import absolute_import
-
+import paths
 #import setGPU
 import os
 import pickle
 import sys
-from random import shuffle, seed
+from random import seed
 import h5py
-import numpy as np
 from tqdm import tqdm
+<<<<<<< HEAD
 sys.path.append(".")
 sys.path.append('..')
 sys.path.append('../ban_vqa/')
 sys.path.append('./lm_lstm_crf/')
 import torch.optim as optim
+=======
+
+>>>>>>> df396fa2628886b8f25dfa91dc2437222886fab1
 import torch
-import torch.nn as nn
 
 from util.reader import Reader
 from util.model_utils import get_box_feats, makevar, get_n_params, f1_score, f1_score_grounded, alignment_score
@@ -67,7 +69,8 @@ def evaluate(net, split, box_data,args,
   print(type(split[3]))
   print(len(split[3]))
   #gt_chunks, gt_alignments, pos_tags = split[3]
-  countgt_chunksize(split[3][:])
+  #countgt_chunksize(split[3][:])
+
   pbar = tqdm(list(range(len(split[0]))))
   net.eval()
 
@@ -79,9 +82,14 @@ def evaluate(net, split, box_data,args,
   count_align = 1.0
   output_chunks_dict={}
 
+  hit_align_predicted = 0.0
+  count_align_predicted = 0.0
+  al_score = 0
+  chunking_score = 0
   for i in pbar:
     words = split[0][i]
     pred_boxes, gt_boxes = split[1][i]
+
     boxes = gt_boxes if use_gt else pred_boxes
     box_type = 'gt' if use_gt else 'pred'
 
@@ -101,14 +109,25 @@ def evaluate(net, split, box_data,args,
     _, pred_chunks, pred_alignments = net.forward(
         words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type], debug=False)
     #print("pred_chunks",pred_chunks)
+    n_boxes = int(box_reps[0].size(0))
+
     if use_predicted:
       for jj, (ph, al) in enumerate(zip(gt_chunks, gt_alignments[box_type])):
         if al == []:
           gt_alignments[box_type][jj] = [box_reps[0].size(0)]
 
+    _, pred_chunks, pred_alignments = net.forward(
+        words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type], debug=False)
+
+    if task_chunk:
+      pred_al_tuples = [list(ch)+pred_alignments.get(ch, [])
+                        for ch in pred_chunks]
+    else:
+      pred_al_tuples = [list(ch)+pred_alignments.get(ch, [])
+                        for ch in pred_alignments]
     gt_al_tuples = []
     for ch, al in zip(gt_chunks, gt_alignments[box_type]):
-      if al:
+      if al != []:
         gt_al_tuples.append(list(ch)+al)
     pred_al_tuples = [list(ch)+pred_alignments[ch] for ch in pred_alignments]
     resobj["pred_chunks"]= pred_chunks
@@ -122,14 +141,6 @@ def evaluate(net, split, box_data,args,
         f1_chunk_wordlevel += f1_score(pred_chunks, gt_chunks)
       count_chunk += 1
     if task_align and gt_al_tuples:
-      sentence = " ".join(words)
-      target_sentence= ["a boy in a red shirt and a boy in a yellow shirt are jumping on a trampoline outside ."]
-      target_sentence.append("two religious men glancing off to their right while standing in front of a church .")
-      target_sentence.append("a closeup shot of a long-haired man playing a red electric guitar .")
-      target_sentence.append("several men and women stand in front of a yellow table that is covered in piles of potatoes .")
-      target_sentence.append("the two tan colored dogs are in a field , and one is jumping in the air .")
-      if(sentence in target_sentence): 
-        print("yay")
       hit, tot = alignment_score(
           pred_al_tuples, gt_al_tuples, use_predicted=box_reps[0].size(0))
       hit_align += hit
@@ -154,12 +165,9 @@ def evaluate(net, split, box_data,args,
   return metrics
 
 
-def train():
-  seed(2)
+def run_evaluate():
 
   args = get_flickr30k_train()
-  config = vars(args)
-  config['command'] = [" ".join(sys.argv[1:])]
 
   # create experiment folder
   if not os.path.exists(args.save_path):
@@ -173,12 +181,6 @@ def train():
       break
     pidx += 1
 
-  snapshot_model = snapshot + '.model'
-
-  meta_f = open(snapshot + '.meta', 'a+')
-  meta_f.write("|".join([key.upper()+'-'+str(config[key]) for key in config]))
-  meta_f.close()
-
   # load data
   reader = pickle.load(open(args.reader_file, 'rb'))
   print("reader {} loaded".format(args.reader_file))
@@ -188,16 +190,32 @@ def train():
 
   # create/load model
   print("loading model..")
-  if args.resume == '':
-    net = get_model(reader, config)
-  else:
-    net = torch.load(args.resume)
-    net.config['command'] += [config['command']]
-  print("model loaded.")
 
-  task_chunk = args.model in set(
+  if args.resume == '':
+    if args.model in ['pipelineilp', 'chal']:
+      config = vars(args)
+      net = get_model(reader, config,
+                      args=args)
+      net.load_weights(reader)
+    else:
+      raise NotImplementedError()
+  else:
+    print('loading an existing model')
+    meta_file = args.resume + '.meta'
+    model_file = args.resume + '.model.best'
+
+    l = [line.strip() for line in open(meta_file)][0]
+    command = l.split('[')[1].split(']')[0][1: -1]
+    parser = get_flickr30k_train(return_parser=True)
+    model_args = parser.parse_args(command.split())
+    config = vars(model_args)
+    net = get_model(reader, config,
+                    args=model_args)
+    net.load_state_dict(torch.load(model_file))
+
+  task_chunk = config['model'] in set(
       ["chunker", "chal", "pipelinecrf", "pipelineilp"])
-  task_align = args.model in set(
+  task_align = config['model'] in set(
       ["aligner", "ban", "chal", "pipelinecrf", "pipelineilp"])
   print("Tasks: chunk {} | align {}".format(task_chunk, task_align))
   gestStats(reader.data['val'], box_data)
@@ -208,4 +226,4 @@ def train():
   
 
 if __name__ == '__main__':
-  train()
+  run_evaluate()

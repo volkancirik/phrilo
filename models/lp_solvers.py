@@ -1,4 +1,4 @@
-'''(I)LP solvers for chunking, alingment, and joing chunking and alignment.
+'''(I)LP solvers for chunking, alingment, and joint chunking and alignment.
 
 '''
 from collections import defaultdict
@@ -68,7 +68,8 @@ class LPChunker():
     self.cache = {}
     self.cache_hit = defaultdict(int)
 
-  def solve(self, phi, n_tokens, _n_boxes, use_coeff=True):
+  def solve(self, phi, n_tokens, _n_boxes,
+            use_coeff=False, max_chunk_length=0):
     '''Solve LP for given chunk scores.
 
     Args:
@@ -79,13 +80,15 @@ class LPChunker():
     Returns:
       chunks: (list) list of (start,end) tuples for chunks.
     '''
-    if n_tokens not in self.cache:
+    if (n_tokens, max_chunk_length) not in self.cache:
+      leftover_length = max(n_tokens - max_chunk_length, 0)
+      n_max_len_chunks = int((leftover_length*(leftover_length+1))/2)
+      n_chunks = int((n_tokens*(n_tokens+1))/2) - n_max_len_chunks
 
-      n_chunks = int((n_tokens*(n_tokens+1))/2)
       n_conditions = (n_chunks+n_tokens)*2 + 2
       coeff = []
       for i in range(n_tokens):
-        coeff += [i+1]*(n_tokens-i)
+        coeff += [i+1]*(min(n_tokens-i, max_chunk_length))
 
       coeff = np.array(coeff)
 
@@ -94,16 +97,19 @@ class LPChunker():
       chunk2id = {}
       idx = 0
       for i in range(0, n_tokens):
-        for j in range(i, n_tokens):
+        for j in range(i, min(n_tokens, i+max_chunk_length)):
           id2chunk[idx] = (i, j)
           chunk2id[(i, j)] = idx
           idx += 1
           for k in range(i, j+1):
             tok2chunks[k].append((i, j))
+
+      # constraints & variables
       a_chunk = sp.dok_matrix(
           (n_conditions, n_chunks), dtype=np.float)
       constraint = np.zeros((1, n_conditions))
 
+      # chunk constraints
       c_offset = 0
       for i in range(n_chunks):
         constraint[0, 2*i] = 1
@@ -112,27 +118,29 @@ class LPChunker():
         a_chunk[2*i+1, i] = -1
         c_offset += 2
 
+      # token constraints
       for i in range(n_tokens):
+        constraint[0, c_offset + 2*i] = 1
+        constraint[0, c_offset + 2*i+1] = -1
         for chunk in tok2chunks[i]:
           idx = chunk2id[chunk]
           a_chunk[c_offset+2*i, idx] = 1
           a_chunk[c_offset+2*i + 1, idx] = -1
-          constraint[0, c_offset + 2*i] = 1
-          constraint[0, c_offset + 2*i+1] = -1
 
       c_offset += 2*n_tokens
 
+      # 2 <= total # of chunks <= n_tokens-1
       for i in range(n_chunks):
         a_chunk[c_offset, i] = 1
         a_chunk[c_offset+1, i] = -1
       constraint[0, c_offset] = n_tokens-1
       constraint[0, c_offset + 1] = -2
 
-      self.cache[n_tokens] = (
+      self.cache[(n_tokens, max_chunk_length)] = (
           a_chunk, constraint, n_chunks, tok2chunks, id2chunk, chunk2id, coeff)
 
     a_chunk, constraint, n_chunks, tok2chunks, id2chunk, chunk2id, coeff = self.cache[
-        n_tokens]
+        (n_tokens, max_chunk_length)]
 
     if use_coeff:
       x_sol = linprog(phi*coeff, coo_matrix(a_chunk), constraint)
@@ -271,7 +279,9 @@ class LPChunkerAligner():
     self.cache = {}
     self.cache_hit = defaultdict(int)
 
-  def solve(self, phi, n_tokens, n_boxes, use_coeff=True):
+  def solve(self, phi, n_tokens, n_boxes,
+            use_coeff=False,
+            max_chunk_length=-1):
     '''Solves chunking and alignment problem given scores between chunks and boxes.
     Args:
       phi: (np array) scores for each chunk-box pair.
@@ -285,21 +295,27 @@ class LPChunkerAligner():
      chunk2id: (dict) chunk tuple (start,end) -> id
     '''
 
-    if n_tokens not in self.cache:
-      n_chunks = int((n_tokens*(n_tokens+1))/2)
+    if (n_tokens, n_boxes, max_chunk_length) not in self.cache:
+      if max_chunk_length < 0:
+        diff = 0
+      else:
+        leftover_length = max(n_tokens - max_chunk_length, 0)
+        diff = int((leftover_length*(leftover_length+1))/2)
+
+      n_chunks = int((n_tokens*(n_tokens+1))/2) - diff
       n_conditions = (n_chunks+n_tokens)*2 + 2
       tok2chunks = defaultdict(list)
       id2chunk = {}
       chunk2id = {}
       idx = 0
       for i in range(0, n_tokens):
-        for j in range(i, n_tokens):
+        for j in range(i, min(n_tokens, i+max_chunk_length)):
           id2chunk[idx] = (i, j)
           chunk2id[(i, j)] = idx
           idx += 1
           for k in range(i, j+1):
             tok2chunks[k].append((i, j))
-      ii, jj = np.ones((n_boxes, n_chunks)).nonzero()
+
       a_chunk = sp.dok_matrix(
           (n_conditions, n_chunks*(1 + n_boxes)), dtype=np.float)
       constraint_chunk = [0.0] * n_conditions
@@ -330,6 +346,7 @@ class LPChunkerAligner():
       b_offset = n_chunks
       n_edges = n_chunks*n_boxes
 
+      ii, jj = np.ones((n_boxes, n_chunks)).nonzero()
       a_edges = sp.dok_matrix(
           (n_chunks + n_boxes, n_edges + b_offset), dtype=np.float)
       a_edges[ii, [v + b_offset for v in range(n_edges)]] = 1
@@ -346,43 +363,35 @@ class LPChunkerAligner():
       constraint_min = [-self.min_chunks_per_box] * \
           n_boxes + [-self.min_boxes_per_chunk] * n_chunks
 
-      # a_id1 = sp.dok_matrix((n_edges, n_edges + b_offset), dtype=np.int)
-      # a_id1[range(n_edges), [v + b_offset for v in range(n_edges)]] = 1
-      # a_id2 = sp.dok_matrix((n_edges, n_edges + b_offset), dtype=np.int)
-      # a_id2[range(n_edges), [v + b_offset for v in range(n_edges)]] = -1
-      # a_align = sp.vstack([a_edges, a_boxes, a_chunks, a_id1, a_id2])
-      # constraint_id = [1.] * n_edges + [0.] * n_edges
-      # constraint_align = constraint_max + constraint_min + constraint_id
-
       a_align = sp.vstack([a_edges, a_boxes, a_chunks])
       constraint_align = constraint_max + constraint_min
 
       a_joint = sp.dok_matrix((n_edges, n_edges + b_offset), dtype=np.float)
-      for ii in range(n_edges):
-        a_joint[ii, ii + n_chunks] = 1
-        a_joint[ii, ii % n_chunks] = -1
-
+      # for kk in range(n_edges):
+      #   a_joint[kk, kk + n_chunks] = 1
+      #   a_joint[kk, kk % n_chunks] = -1
       constraint_joint = [0] * n_edges
-
       constraint = constraint_chunk + constraint_align + constraint_joint
 
       A = sp.vstack([a_chunk, a_align, a_joint])
 
       coeff = []
       for i in range(n_tokens):
-        coeff += [i+1]*(n_tokens-i)
+        coeff += [i+1]*(min(n_tokens-i, max_chunk_length))
       coeff += [1.0] * (n_boxes * n_chunks)
       coeff = np.array(coeff)
+      self.cache[(n_tokens, n_boxes, max_chunk_length)] = (
+          A, constraint, n_chunks, tok2chunks, id2chunk, chunk2id, coeff)
 
-      self.cache[(n_tokens, n_boxes)] = (
-          A, constraint, n_chunks, tok2chunks, id2chunk, chunk2id)
-
-    A, constraint, n_chunks, tok2chunks, id2chunk, chunk2id = self.cache[(
-        n_tokens, n_boxes)]
-    self.cache_hit[(n_tokens, n_boxes)] += 1
+    A, constraint, n_chunks, tok2chunks, id2chunk, chunk2id, coeff = self.cache[(
+        n_tokens, n_boxes, max_chunk_length)]
+    self.cache_hit[(n_tokens, n_boxes, max_chunk_length)] += 1
     if phi.shape[1] != n_chunks*(n_boxes+1):
-      raise ValueError('Shapes do not match! {} vs {}'.format(
+      raise ValueError('phi & n_chunks*(n_boxes+1) shapes do not match! {} vs {}'.format(
           phi.shape[1], n_chunks*(n_boxes+1)))
+    if phi.shape[1] != coeff.shape[0]:
+      raise ValueError('phi & coeff shapes do not match! {} vs {}'.format(
+          phi.shape[1], coeff.shape[0]))
 
     # convert chunk -> box to box -> chunk
     phi[0, n_chunks:] = phi[0, n_chunks:].reshape(n_chunks, n_boxes).transpose().reshape(
@@ -446,28 +455,30 @@ def run_tests():
   n_chunks = int(n_tokens*(n_tokens+1)/2)
   n_boxes = 3
   phi = np.array([[0.00, 1.01, 0.02, 0.03, 0.04, 0.05, 0.06, 1.07, 0.08, 1.09,
-                   -0.00, -0.01, 0.02,
-                   1.10, -0.01, -0.02,
-                   -0.20, -0.01, -0.02,
-                   -0.30, -0.01, -0.02,
-                   -0.40, -0.01, -0.02,
-                   -0.50, -0.01, -0.02,
-                   -0.60, -0.01, -0.02,
-                   -0.70, 0.01, -0.02,
-                   -0.80, -0.01, -0.02,
-                   1.90, -0.01,  1.02]])
+                   0.00, 0.01, 0.02,
+                   1.01, -0.01, -0.02,
+                   0.02, 0.01, 0.02,
+                   0.03, 0.01, 0.02,
+                   0.04, 0.01, 0.02,
+                   0.05, 0.01, 0.02,
+                   0.06, 0.01, 0.02,
+                   -0.07, -0.01, 0.02,
+                   0.08, 0.01, 0.02,
+                   0.09, 0.01, 1.02]])
+  phi = np.random.randn(1, 40)
+  print('phi', phi.shape)
 
   chunkeraligner = LPChunkerAligner(max_chunks_per_box=n_tokens,
-                                    max_boxes_per_chunk=3,
+                                    max_boxes_per_chunk=1,
                                     min_boxes_per_chunk=0,
                                     min_chunks_per_box=0)
   chunks, alignments, _, id2chunk, chunk2id = chunkeraligner.solve(
       phi, n_tokens, n_boxes)
   print('\nChunker+Aligner output:')
-  print(chunks)
-  print(id2chunk)
-  print(chunk2id)
-  print(alignments)
+  print('chunks:', chunks)
+  print('id2chunk:', id2chunk)
+  print('chunk2id:', chunk2id)
+  print('alignments:', alignments)
 
 
 if __name__ == '__main__':

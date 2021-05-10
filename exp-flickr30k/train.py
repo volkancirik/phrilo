@@ -22,8 +22,9 @@ import torch.nn as nn
 sys.path.append(".")
 print(sys.path)
 #import util
+
 from util.reader import Reader
-from util.model_utils import get_box_feats, makevar, get_n_params, f1_score, alignment_score
+from util.model_utils import get_box_feats, f1_score, alignment_score
 from util.arguments import get_flickr30k_train
 from models.get_model import get_model
 from util.model_utils import dump_tensors
@@ -134,8 +135,7 @@ def train():
   print('loading model..')
   if args.resume == '':
     net = get_model(reader, config,
-                    args = args)
-
+                    args=args)
   else:
     net = torch.load(args.resume)
     #net.config['command'] += [config['command']]
@@ -149,6 +149,9 @@ def train():
   else:
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters(
     )), lr=config['lr'], weight_decay=config['w_decay'])
+
+  if config['model'] == 'chal':
+    net.load_weights(reader)
 
   print('experiment configuration')
   print('='*30)
@@ -235,8 +238,10 @@ def train():
 
         loss_obj, pred_chunks, pred_alignments = net.forward(
             words, pos_tags, box_reps, gt_chunks, gt_alignments[box_type],debug=False)
-        loss= loss_obj['tot_loss']
-        loss_ca= loss_obj['loss_ca']
+        # loss= loss_obj['tot_loss']
+        # loss_ca= loss_obj['loss_ca']
+        loss =loss_obj
+        loss_ca=0
         #print("chunks",pred_chunks)
 
         gt_al_tuples = []
@@ -244,12 +249,13 @@ def train():
           if al != []:
             gt_al_tuples.append(list(ch)+al)
 
-        if task_align and task_chunk:
-          pred_al_tuples = [list(ch)+pred_alignments[ch]
-                            for ch in pred_chunks]
-        elif task_align:
-          pred_al_tuples = [list(ch)+pred_alignments[ch]
-                            for ch in pred_alignments]
+        if task_align:
+          if task_chunk:
+            pred_al_tuples = [list(ch)+pred_alignments[ch]
+                              for ch in pred_chunks]
+          else:
+            pred_al_tuples = [list(ch)+pred_alignments[ch]
+                              for ch in pred_alignments]
 
         if task_chunk and pred_chunks != []:
           f1_chunk += f1_score(pred_chunks, gt_chunks)
@@ -263,7 +269,6 @@ def train():
                 pred_al_tuples, gt_al_tuples, use_predicted=n_boxes)
             hit_align_predicted += hit
             count_align_predicted += tot
-
         if isinstance(loss, int):
           continue
         closs += float(loss.data.item())
@@ -308,7 +313,8 @@ def train():
       writer.flush()
       print('\nScore: {:3.4f}'.format(val_score))
       if best_val < val_score:
-        torch.save(net, snapshot_model + '.best')
+        torch.save(net.state_dict(), snapshot_model + '.best')
+
         best_val = val_score
         print('best model is updated with score {:3.4f} to {}'.format(
             best_val, snapshot_model + '.best'))
@@ -321,7 +327,7 @@ def train():
       else:
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters(
         )), lr=config['lr'], weight_decay=config['w_decay'])
-      torch.save(net, snapshot_model+'.EPOCH'+str(epoch))
+      torch.save(net.state_dict(), snapshot_model+'.EPOCH'+str(epoch))
 
 
 if __name__ == '__main__':
