@@ -74,7 +74,6 @@ class CHAL(nn.Module):
       decoder = self.decoder_trn
       max_chunk_length = 19
     else:
-      o
       decoder = self.decoder_tst
       max_chunk_length = 10
     cnn, spat = box_reps
